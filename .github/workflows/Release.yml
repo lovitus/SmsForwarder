@@ -37,11 +37,34 @@ jobs:
           go-version: "1.22.x"
 
       - name: Checkout Android Keystore
+        if: ${{ secrets.TOKEN != '' }}
         uses: actions/checkout@v4
         with:
           repository: pppscn/keystore
           token: ${{ secrets.TOKEN }}
           path: keystore
+
+      - name: Prepare Android Keystore (Fallback)
+        if: ${{ secrets.TOKEN == '' }}
+        run: |
+          set -euo pipefail
+          mkdir -p keystore
+          keytool -genkeypair -v \
+            -keystore keystore/debug.keystore \
+            -storepass android \
+            -alias androiddebugkey \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -noprompt
+          cat > keystore/keystore.properties <<'EOF'
+          storeFile=../keystore/debug.keystore
+          storePassword=android
+          keyAlias=androiddebugkey
+          keyPassword=android
+          EOF
 
       - name: Resolve Release Tag
         run: |
