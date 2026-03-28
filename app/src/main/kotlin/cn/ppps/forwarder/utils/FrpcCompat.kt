@@ -6,6 +6,7 @@ import frpclib.Frpclib
 import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 object FrpcCompat {
 
@@ -16,6 +17,8 @@ object FrpcCompat {
     private const val CONFIG_DIR = "frpc"
     private val processMap = ConcurrentHashMap<String, Process>()
     private val installLock = Any()
+    @Volatile
+    private var customBackendUsable: Boolean? = null
 
     private fun getCurrentAbi(): String {
         val abi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -79,6 +82,7 @@ object FrpcCompat {
                 customBinary.setReadable(true, false)
                 customBinary.setWritable(true, true)
                 customBinary.setExecutable(true, false)
+                customBackendUsable = null
                 customBinary.canExecute()
             } catch (e: Exception) {
                 Log.d(TAG, "custom frpc asset not found for abi=$abi, fallback to jni backend: ${e.message}")
@@ -87,9 +91,108 @@ object FrpcCompat {
         }
     }
 
+    private fun markCustomBackendUnavailable(reason: String) {
+        customBackendUsable = false
+        Log.e(TAG, "disable custom backend, reason=$reason")
+    }
+
+    private fun probeCustomBackend(customBinary: File): Boolean {
+        return try {
+            val process = ProcessBuilder(customBinary.absolutePath, "--version")
+                .directory(App.context.filesDir)
+                .redirectErrorStream(true)
+                .start()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            val finished = process.waitFor(3, TimeUnit.SECONDS)
+            if (!finished) {
+                process.destroy()
+                Log.e(TAG, "custom backend probe timeout")
+                false
+            } else {
+                val exitCode = process.exitValue()
+                val ok = exitCode == 0 || output.contains("frpc", ignoreCase = true)
+                if (!ok) {
+                    Log.e(TAG, "custom backend probe failed: code=$exitCode, output=$output")
+                }
+                ok
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "custom backend probe exception: ${e.message}")
+            false
+        }
+    }
+
     private fun hasCustomBackend(): Boolean {
         val binary = getCustomBinaryFile()
-        return (binary.exists() && binary.canExecute()) || ensureCustomBinaryInstalled()
+        val installed = (binary.exists() && binary.canExecute()) || ensureCustomBinaryInstalled()
+        if (!installed) return false
+
+        customBackendUsable?.let { return it }
+        val usable = probeCustomBackend(binary)
+        customBackendUsable = usable
+        return usable
+    }
+
+    private fun isBackendBinaryError(message: String): Boolean {
+        val lower = message.lowercase()
+        return lower.contains("exec format error")
+            || lower.contains("permission denied")
+            || lower.contains("bad cpu type")
+            || lower.contains("no such file or directory")
+    }
+
+    private fun getVersionByJni(): String {
+        return try {
+            Frpclib.getVersion()
+        } catch (e: Throwable) {
+            Log.e(TAG, "jni frpc getVersion error: ${e.message}")
+            ""
+        }
+    }
+
+    private fun getUidsByJni(): String {
+        return try {
+            Frpclib.getUids()
+        } catch (e: Throwable) {
+            Log.e(TAG, "jni frpc getUids error: ${e.message}")
+            ""
+        }
+    }
+
+    private fun isRunningByJni(uid: String): Boolean {
+        return try {
+            Frpclib.isRunning(uid)
+        } catch (e: Throwable) {
+            Log.e(TAG, "jni frpc isRunning error: ${e.message}")
+            false
+        }
+    }
+
+    private fun closeByJni(uid: String): Boolean {
+        return try {
+            Frpclib.close(uid)
+        } catch (e: Throwable) {
+            Log.e(TAG, "jni frpc close error: ${e.message}")
+            false
+        }
+    }
+
+    private fun runContentByJni(uid: String, config: String): String {
+        return try {
+            Frpclib.runContent(uid, config)
+        } catch (e: Throwable) {
+            Log.e(TAG, "jni frpc runContent error: ${e.message}")
+            e.message ?: "jni frpc unavailable"
+        }
+    }
+
+    private fun runFileByJni(uid: String, configPath: String): String {
+        return try {
+            Frpclib.runFile(uid, configPath)
+        } catch (e: Throwable) {
+            Log.e(TAG, "jni frpc runFile error: ${e.message}")
+            e.message ?: "jni frpc unavailable"
+        }
     }
 
     fun isReady(): Boolean {
@@ -106,12 +209,7 @@ object FrpcCompat {
         return if (hasCustomBackend()) {
             FRPC_CUSTOM_VERSION
         } else {
-            try {
-                Frpclib.getVersion()
-            } catch (e: Throwable) {
-                Log.e(TAG, "jni frpc getVersion error: ${e.message}")
-                ""
-            }
+            getVersionByJni()
         }
     }
 
@@ -120,7 +218,7 @@ object FrpcCompat {
             cleanupProcessMap()
             processMap.keys.sorted().joinToString(",")
         } else {
-            Frpclib.getUids()
+            getUidsByJni()
         }
     }
 
@@ -132,7 +230,7 @@ object FrpcCompat {
             val process = processMap[uid] ?: return false
             isProcessAlive(process)
         } else {
-            Frpclib.isRunning(uid)
+            isRunningByJni(uid)
         }
     }
 
@@ -149,13 +247,13 @@ object FrpcCompat {
                 false
             }
         } else {
-            Frpclib.close(uid)
+            closeByJni(uid)
         }
     }
 
     fun runContent(uid: String, config: String): String {
         if (!hasCustomBackend()) {
-            return Frpclib.runContent(uid, config)
+            return runContentByJni(uid, config)
         }
         if (uid.isEmpty()) return "frpc uid is empty"
 
@@ -175,7 +273,7 @@ object FrpcCompat {
 
     fun runFile(uid: String, configPath: String): String {
         if (!hasCustomBackend()) {
-            return Frpclib.runFile(uid, configPath)
+            return runFileByJni(uid, configPath)
         }
         if (uid.isEmpty()) return "frpc uid is empty"
         if (isRunning(uid)) return ""
@@ -200,6 +298,21 @@ object FrpcCompat {
                 .redirectErrorStream(true)
                 .start()
 
+            val exitedQuickly = process.waitFor(500, TimeUnit.MILLISECONDS)
+            if (exitedQuickly) {
+                val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+                val errorMessage = if (output.isEmpty()) {
+                    "custom frpc exited early, code=${process.exitValue()}"
+                } else {
+                    output
+                }
+                if (isBackendBinaryError(errorMessage)) {
+                    markCustomBackendUnavailable(errorMessage)
+                    return runFileByJni(uid, configPath)
+                }
+                return errorMessage
+            }
+
             processMap[uid] = process
 
             Thread {
@@ -219,7 +332,13 @@ object FrpcCompat {
             ""
         } catch (e: Exception) {
             Log.e(TAG, "runFile error: ${e.message}")
-            e.message ?: "runFile error"
+            val message = e.message ?: "runFile error"
+            return if (isBackendBinaryError(message)) {
+                markCustomBackendUnavailable(message)
+                runFileByJni(uid, configPath)
+            } else {
+                message
+            }
         }
     }
 }

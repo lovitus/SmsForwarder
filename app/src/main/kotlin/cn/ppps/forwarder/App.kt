@@ -55,6 +55,7 @@ import cn.ppps.forwarder.utils.SharedPreference
 import cn.ppps.forwarder.utils.sdkinit.UMengInit
 import cn.ppps.forwarder.utils.sdkinit.XBasicLibInit
 import cn.ppps.forwarder.utils.sdkinit.XUpdateInit
+import cn.ppps.forwarder.utils.tinker.TinkerLoadLibrary
 import com.king.location.LocationClient
 import cn.ppps.forwarder.utils.FrpcCompat
 import io.reactivex.Observable
@@ -182,6 +183,16 @@ class App : Application(), CactusCallback, Configuration.Provider by Core {
 
             //初始化WorkManager
             WorkManager.initialize(this, Configuration.Builder().build())
+
+            //支持动态加载下载到 files/libs 的 legacy JNI frpc 动态库
+            val libsDir = File(filesDir, "libs")
+            if (libsDir.exists()) {
+                try {
+                    TinkerLoadLibrary.installNativeLibraryPath(classLoader, libsDir)
+                } catch (throwable: Throwable) {
+                    Log.e(TAG, "load legacy frpc jni failed: ${throwable.message}")
+                }
+            }
 
             //优先尝试安装并使用定制frpc二进制，未命中时回退到原JNI方案
             FrpcCompat.ensureCustomBinaryInstalled()

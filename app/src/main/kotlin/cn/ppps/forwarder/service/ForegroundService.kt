@@ -80,13 +80,13 @@ class ForegroundService : Service() {
             override fun onError(e: Throwable) {
                 e.printStackTrace()
                 Log.e(TAG, "onError: ${e.message}")
-                LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post(uid)
+                LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post("[$uid] ${e.message ?: "unknown error"}")
             }
 
             override fun onSuccess(msg: String) {
                 if (!TextUtils.isEmpty(msg)) {
                     Log.e(TAG, msg)
-                    LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post(uid)
+                    LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post("[$uid] $msg")
                 } else {
                     LiveEventBus.get(EVENT_FRPC_RUNNING_SUCCESS, String::class.java).post(uid)
                 }
