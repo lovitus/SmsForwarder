@@ -13,6 +13,7 @@ object FrpcCompat {
     private const val TAG = "FrpcCompat"
     private const val CUSTOM_BINARY_NAME = "frpc"
     private const val CUSTOM_BINARY_DIR = "libs"
+    private const val CUSTOM_BINARY_BUILD_INFO_NAME = "frpc.buildinfo"
     private const val CUSTOM_ASSET_DIR = "frpc"
     private const val CONFIG_DIR = "frpc"
     private val processMap = ConcurrentHashMap<String, Process>()
@@ -45,6 +46,90 @@ object FrpcCompat {
         return File(dir, CUSTOM_BINARY_NAME)
     }
 
+    private fun getCustomBinaryBuildInfoFile(): File {
+        val dir = File(App.context.filesDir, CUSTOM_BINARY_DIR)
+        if (!dir.exists()) {
+            dir.mkdirs()
+        }
+        return File(dir, CUSTOM_BINARY_BUILD_INFO_NAME)
+    }
+
+    private fun readAssetText(assetPath: String): String {
+        return try {
+            App.context.assets.open(assetPath).bufferedReader().use { it.readText() }
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun parseBuildInfo(text: String): Map<String, String> {
+        if (text.isBlank()) return emptyMap()
+        val map = mutableMapOf<String, String>()
+        text.lineSequence().forEach { line ->
+            val index = line.indexOf("=")
+            if (index <= 0) return@forEach
+            val key = line.substring(0, index).trim()
+            val value = line.substring(index + 1).trim()
+            if (key.isNotEmpty() && value.isNotEmpty()) {
+                map[key] = value
+            }
+        }
+        return map
+    }
+
+    private fun getInstalledBuildInfoText(): String {
+        return try {
+            val file = getCustomBinaryBuildInfoFile()
+            if (file.exists()) file.readText() else ""
+        } catch (_: Exception) {
+            ""
+        }
+    }
+
+    private fun currentBackendSummary(useCustomBackend: Boolean = hasCustomBackend()): String {
+        val abi = getCurrentAbi()
+        return if (useCustomBackend) {
+            val buildInfoText = getInstalledBuildInfoText().ifEmpty {
+                readAssetText("$CUSTOM_ASSET_DIR/BUILD_INFO.txt")
+            }
+            val buildInfo = parseBuildInfo(buildInfoText)
+            val ref = buildInfo["frp_ref"].orEmpty()
+            val commit = buildInfo["frp_commit"].orEmpty()
+            buildString {
+                append("backend=custom")
+                append(" version=").append(FRPC_CUSTOM_VERSION)
+                append(" abi=").append(abi)
+                if (ref.isNotEmpty()) append(" ref=").append(ref)
+                if (commit.isNotEmpty()) append(" commit=").append(commit)
+            }
+        } else {
+            val jniVersion = getVersionByJni().ifEmpty { "unknown" }
+            "backend=jni version=$jniVersion abi=$abi"
+        }
+    }
+
+    private fun withBackendInfo(message: String, useCustomBackend: Boolean = hasCustomBackend()): String {
+        val detail = message.trim()
+        if (detail.isEmpty()) return currentBackendSummary(useCustomBackend)
+        if (detail.contains("backend=", ignoreCase = true)) return detail
+        return "${currentBackendSummary(useCustomBackend)} | $detail"
+    }
+
+    private fun detectConfigFileExt(config: String): String {
+        val trimmed = config.trimStart()
+        if (trimmed.startsWith("{")) return "json"
+
+        val lines = config.lineSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() && !it.startsWith("#") && !it.startsWith(";") }
+            .take(12)
+            .toList()
+
+        if (lines.any { it.equals("[common]", ignoreCase = true) }) return "ini"
+        if (lines.any { it.contains(":") && !it.contains("=") }) return "yaml"
+        return "toml"
+    }
+
     private fun isProcessAlive(process: Process): Boolean {
         return try {
             process.exitValue()
@@ -67,26 +152,58 @@ object FrpcCompat {
     fun ensureCustomBinaryInstalled(): Boolean {
         synchronized(installLock) {
             val customBinary = getCustomBinaryFile()
-            if (customBinary.exists()) {
-                customBinary.setExecutable(true, false)
-                return customBinary.canExecute()
-            }
-
             val abi = getCurrentAbi()
             val assetPath = "$CUSTOM_ASSET_DIR/$abi/$CUSTOM_BINARY_NAME"
+            val bundledBuildInfo = readAssetText("$CUSTOM_ASSET_DIR/BUILD_INFO.txt")
+            val buildInfoFile = getCustomBinaryBuildInfoFile()
+
+            val hasBundledAsset = try {
+                App.context.assets.open(assetPath).close()
+                true
+            } catch (_: Exception) {
+                false
+            }
+
+            if (!hasBundledAsset) {
+                if (customBinary.exists()) customBinary.delete()
+                if (buildInfoFile.exists()) buildInfoFile.delete()
+                customBackendUsable = false
+                Log.d(TAG, "custom frpc asset not found for abi=$abi")
+                return false
+            }
+
+            if (customBinary.exists() && customBinary.canExecute()) {
+                val installedBuildInfo = getInstalledBuildInfoText()
+                if (installedBuildInfo.isNotEmpty() && bundledBuildInfo.isNotEmpty() && installedBuildInfo == bundledBuildInfo) {
+                    customBinary.setExecutable(true, false)
+                    return customBinary.canExecute()
+                }
+            }
+
             return try {
+                val tempBinary = File(customBinary.parentFile, "${CUSTOM_BINARY_NAME}.tmp")
                 App.context.assets.open(assetPath).use { input ->
-                    FileOutputStream(customBinary).use { output ->
+                    FileOutputStream(tempBinary).use { output ->
                         input.copyTo(output)
                     }
+                }
+                if (customBinary.exists()) customBinary.delete()
+                if (!tempBinary.renameTo(customBinary)) {
+                    tempBinary.copyTo(customBinary, overwrite = true)
+                    tempBinary.delete()
                 }
                 customBinary.setReadable(true, false)
                 customBinary.setWritable(true, true)
                 customBinary.setExecutable(true, false)
+                if (bundledBuildInfo.isNotEmpty()) {
+                    buildInfoFile.writeText(bundledBuildInfo)
+                } else if (buildInfoFile.exists()) {
+                    buildInfoFile.delete()
+                }
                 customBackendUsable = null
                 customBinary.canExecute()
             } catch (e: Exception) {
-                Log.d(TAG, "custom frpc asset not found for abi=$abi, fallback to jni backend: ${e.message}")
+                Log.e(TAG, "install custom frpc failed for abi=$abi: ${e.message}")
                 false
             }
         }
@@ -150,11 +267,15 @@ object FrpcCompat {
         return usable
     }
 
-    private fun isBackendBinaryError(message: String): Boolean {
+    private fun isBackendStartError(message: String): Boolean {
         val lower = message.lowercase()
         return lower.contains("exec format error")
-            || lower.contains("permission denied")
             || lower.contains("bad cpu type")
+            || lower.contains("cannot run program")
+            || lower.contains("error=8")
+            || lower.contains("error=13")
+            || lower.contains("permission denied")
+            || lower.contains("error=2")
             || lower.contains("no such file or directory")
     }
 
@@ -222,6 +343,10 @@ object FrpcCompat {
         }
     }
 
+    fun getBackendSummary(): String {
+        return currentBackendSummary()
+    }
+
     fun getVersion(): String {
         return if (hasCustomBackend()) {
             FRPC_CUSTOM_VERSION
@@ -272,8 +397,13 @@ object FrpcCompat {
     fun runContent(uid: String, config: String): String {
         if (!hasCustomBackend()) {
             val error = runContentByJni(uid, config)
-            if (error.isNotEmpty()) setLastError(uid, error) else clearLastError(uid)
-            return error
+            if (error.isNotEmpty()) {
+                val detail = withBackendInfo(error, useCustomBackend = false)
+                setLastError(uid, detail)
+                return detail
+            }
+            clearLastError(uid)
+            return ""
         }
         if (uid.isEmpty()) return "frpc uid is empty"
         clearLastError(uid)
@@ -282,13 +412,14 @@ object FrpcCompat {
         if (!configDir.exists()) {
             configDir.mkdirs()
         }
-        val configFile = File(configDir, "$uid.toml")
+        val configExt = detectConfigFileExt(config)
+        val configFile = File(configDir, "$uid.$configExt")
         return try {
             configFile.writeText(config)
             runFile(uid, configFile.absolutePath)
         } catch (e: Exception) {
             Log.e(TAG, "runContent error: ${e.message}")
-            val error = e.message ?: "runContent error"
+            val error = withBackendInfo(e.message ?: "runContent error", useCustomBackend = true)
             setLastError(uid, error)
             error
         }
@@ -297,8 +428,13 @@ object FrpcCompat {
     fun runFile(uid: String, configPath: String): String {
         if (!hasCustomBackend()) {
             val error = runFileByJni(uid, configPath)
-            if (error.isNotEmpty()) setLastError(uid, error) else clearLastError(uid)
-            return error
+            if (error.isNotEmpty()) {
+                val detail = withBackendInfo(error, useCustomBackend = false)
+                setLastError(uid, detail)
+                return detail
+            }
+            clearLastError(uid)
+            return ""
         }
         if (uid.isEmpty()) return "frpc uid is empty"
         if (isRunning(uid)) return ""
@@ -306,14 +442,14 @@ object FrpcCompat {
 
         val configFile = File(configPath)
         if (!configFile.exists()) {
-            val error = "config file not found: $configPath"
+            val error = withBackendInfo("config file not found: $configPath", useCustomBackend = true)
             setLastError(uid, error)
             return error
         }
 
         val customBinary = getCustomBinaryFile()
         if (!customBinary.exists() || !customBinary.canExecute()) {
-            val error = "frpc binary not found"
+            val error = withBackendInfo("frpc binary not found", useCustomBackend = true)
             setLastError(uid, error)
             return error
         }
@@ -336,14 +472,9 @@ object FrpcCompat {
                 } else {
                     output
                 }
-                if (isBackendBinaryError(errorMessage)) {
-                    markCustomBackendUnavailable(errorMessage)
-                    val fallbackError = runFileByJni(uid, configPath)
-                    if (fallbackError.isNotEmpty()) setLastError(uid, fallbackError)
-                    return fallbackError
-                }
-                setLastError(uid, errorMessage)
-                return errorMessage
+                val detail = withBackendInfo(errorMessage, useCustomBackend = true)
+                setLastError(uid, detail)
+                return detail
             }
 
             processMap[uid] = process
@@ -372,7 +503,7 @@ object FrpcCompat {
                         } else {
                             "frpc exited with code $exitCode\n$tailLog"
                         }
-                        setLastError(uid, error)
+                        setLastError(uid, withBackendInfo(error, useCustomBackend = true))
                     }
                     processMap.remove(uid)
                 }
@@ -382,14 +513,20 @@ object FrpcCompat {
         } catch (e: Exception) {
             Log.e(TAG, "runFile error: ${e.message}")
             val message = e.message ?: "runFile error"
-            return if (isBackendBinaryError(message)) {
+            return if (isBackendStartError(message)) {
                 markCustomBackendUnavailable(message)
                 val fallbackError = runFileByJni(uid, configPath)
-                if (fallbackError.isNotEmpty()) setLastError(uid, fallbackError)
-                fallbackError
+                if (fallbackError.isNotEmpty()) {
+                    val detail = withBackendInfo(fallbackError, useCustomBackend = false)
+                    setLastError(uid, detail)
+                    detail
+                } else {
+                    ""
+                }
             } else {
-                setLastError(uid, message)
-                message
+                val detail = withBackendInfo(message, useCustomBackend = true)
+                setLastError(uid, detail)
+                detail
             }
         }
     }

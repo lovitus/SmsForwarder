@@ -69,14 +69,19 @@ class ForegroundService : Service() {
     private val compositeDisposable = CompositeDisposable()
     private fun buildFrpcError(uid: String, msg: String?): String {
         val detail = msg?.trim().orEmpty()
+        val backend = FrpcCompat.getBackendSummary()
         if (detail.isNotEmpty()) {
-            return "[$uid] $detail"
+            return if (detail.contains("backend=", ignoreCase = true)) {
+                "[$uid] $detail"
+            } else {
+                "[$uid] $backend | $detail"
+            }
         }
         val fallback = FrpcCompat.getLastError(uid)
         if (fallback.isNotEmpty()) {
             return "[$uid] $fallback"
         }
-        return "[$uid] unknown frpc error"
+        return "[$uid] $backend | unknown frpc error"
     }
 
     private val frpcObserver = Observer { uid: String ->

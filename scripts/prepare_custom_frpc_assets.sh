@@ -50,11 +50,11 @@ build_frpc() {
   chmod +x "${ASSET_ROOT}/${abi}/frpc"
 }
 
-# 从指定分支源码编译 4 架构（不再依赖 tag release 资产）
-build_frpc "arm64-v8a" "android" "arm64"
-build_frpc "armeabi-v7a" "android" "arm" "7"
-build_frpc "x86_64" "android" "amd64"
-build_frpc "x86" "android" "386"
+# 从指定分支源码编译 4 架构（使用静态 linux 目标，兼容 Android 运行环境）
+build_frpc "arm64-v8a" "linux" "arm64"
+build_frpc "armeabi-v7a" "linux" "arm" "7"
+build_frpc "x86_64" "linux" "amd64"
+build_frpc "x86" "linux" "386"
 
 if command -v sha256sum >/dev/null 2>&1; then
   (

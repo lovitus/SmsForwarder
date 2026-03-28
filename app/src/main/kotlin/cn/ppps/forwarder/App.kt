@@ -197,6 +197,7 @@ class App : Application(), CactusCallback, Configuration.Provider by Core {
             //优先尝试安装并使用定制frpc二进制，未命中时回退到原JNI方案
             FrpcCompat.ensureCustomBinaryInstalled()
             FrpclibInited = FrpcCompat.isReady()
+            Log.d(TAG, "Frpc init: inited=$FrpclibInited, ${FrpcCompat.getBackendSummary()}")
 
             //启动前台服务
             val foregroundServiceIntent = Intent(this, ForegroundService::class.java)
