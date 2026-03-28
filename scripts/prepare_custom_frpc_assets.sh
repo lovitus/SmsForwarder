@@ -59,9 +59,10 @@ build_frpc "x86" "linux" "386"
 compress_frpc_asset() {
   local abi="$1"
   local raw_file="${ASSET_ROOT}/${abi}/frpc"
-  local compressed_file="${ASSET_ROOT}/${abi}/frpc.gz"
+  local compressed_file="${ASSET_ROOT}/${abi}/frpc.bin"
   gzip -n -9 -c "${raw_file}" > "${compressed_file}"
   rm -f "${raw_file}"
+  echo "Packed ${abi} -> $(basename "${compressed_file}")"
 }
 
 compress_frpc_asset "arm64-v8a"
@@ -72,7 +73,7 @@ compress_frpc_asset "x86"
 if command -v sha256sum >/dev/null 2>&1; then
   (
     cd "${ASSET_ROOT}"
-    sha256sum armeabi-v7a/frpc.gz arm64-v8a/frpc.gz x86/frpc.gz x86_64/frpc.gz > SHA256SUMS.txt
+    sha256sum armeabi-v7a/frpc.bin arm64-v8a/frpc.bin x86/frpc.bin x86_64/frpc.bin > SHA256SUMS.txt
   )
 fi
 
@@ -83,5 +84,8 @@ frp_commit=${FRP_COMMIT}
 source_tree=https://github.com/lovitus/frp/tree/${FRP_REF}
 generated_at_utc=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
+
+echo "Prepared asset files:"
+find "${ASSET_ROOT}" -maxdepth 2 -type f | sort
 
 echo "Custom frpc assets prepared at ${ASSET_ROOT}"
