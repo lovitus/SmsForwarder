@@ -285,6 +285,12 @@ object FrpcCompat {
         if (!installed) return false
 
         customBackendUsable?.let { return it }
+        // with_frpc 包不再依赖 --version 探测，直接按可执行处理，
+        // 启动时由 runFile 返回真实错误（避免探测误判导致 custom unavailable）。
+        if (customOnlyMode()) {
+            customBackendUsable = true
+            return true
+        }
         val usable = probeCustomBackend(binary)
         customBackendUsable = usable
         return usable
