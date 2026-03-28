@@ -78,6 +78,7 @@ android {
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "String", "BUILD_TIME", "\"${buildTime}\""
         buildConfigField "String", "GIT_COMMIT_ID", "\"${gitCommitId}\""
+        buildConfigField "boolean", "WITH_FRPC_PACKAGE", "${withFrpcPackage}"
 
         multiDexEnabled true
         //vectorDrawables.useSupportLibrary = true

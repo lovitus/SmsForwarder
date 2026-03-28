@@ -18,6 +18,7 @@ import com.hjq.permissions.XXPermissions
 import com.hjq.permissions.permission.PermissionLists
 import com.hjq.permissions.permission.base.IPermission
 import cn.ppps.forwarder.App
+import cn.ppps.forwarder.BuildConfig
 import cn.ppps.forwarder.R
 import cn.ppps.forwarder.adapter.menu.DrawerAdapter
 import cn.ppps.forwarder.adapter.menu.DrawerItem
@@ -42,6 +43,7 @@ import cn.ppps.forwarder.utils.CommonUtils.Companion.restartApplication
 import cn.ppps.forwarder.utils.EVENT_LOAD_APP_LIST
 import cn.ppps.forwarder.utils.FRPC_LIB_DOWNLOAD_URL
 import cn.ppps.forwarder.utils.FRPC_LIB_VERSION
+import cn.ppps.forwarder.utils.FrpcCompat
 import cn.ppps.forwarder.utils.Log
 import cn.ppps.forwarder.utils.SettingUtils
 import cn.ppps.forwarder.utils.XToastUtils
@@ -265,6 +267,10 @@ class MainActivity : BaseActivity<ActivityMainBinding?>(), DrawerAdapter.OnItemS
             POS_FRPC -> {
                 if (App.FrpclibInited) {
                     openNewPage(FrpcFragment::class.java)
+                    return
+                }
+                if (BuildConfig.WITH_FRPC_PACKAGE) {
+                    XToastUtils.error(FrpcCompat.getBackendSummary())
                     return
                 }
 

@@ -2,6 +2,7 @@ package cn.ppps.forwarder.utils
 
 import android.os.Build
 import cn.ppps.forwarder.App
+import cn.ppps.forwarder.BuildConfig
 import frpclib.Frpclib
 import java.io.File
 import java.io.FileOutputStream
@@ -21,6 +22,10 @@ object FrpcCompat {
     private val installLock = Any()
     @Volatile
     private var customBackendUsable: Boolean? = null
+
+    private fun customOnlyMode(): Boolean {
+        return BuildConfig.WITH_FRPC_PACKAGE
+    }
 
     private fun getCurrentAbi(): String {
         val abi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
@@ -86,6 +91,22 @@ object FrpcCompat {
         }
     }
 
+    private fun customUnavailableSummary(): String {
+        val abi = getCurrentAbi()
+        val buildInfoText = getInstalledBuildInfoText().ifEmpty {
+            readAssetText("$CUSTOM_ASSET_DIR/BUILD_INFO.txt")
+        }
+        val buildInfo = parseBuildInfo(buildInfoText)
+        val ref = buildInfo["frp_ref"].orEmpty()
+        val commit = buildInfo["frp_commit"].orEmpty()
+        return buildString {
+            append("backend=custom unavailable")
+            append(" abi=").append(abi)
+            if (ref.isNotEmpty()) append(" ref=").append(ref)
+            if (commit.isNotEmpty()) append(" commit=").append(commit)
+        }
+    }
+
     private fun currentBackendSummary(useCustomBackend: Boolean = hasCustomBackend()): String {
         val abi = getCurrentAbi()
         return if (useCustomBackend) {
@@ -102,6 +123,8 @@ object FrpcCompat {
                 if (ref.isNotEmpty()) append(" ref=").append(ref)
                 if (commit.isNotEmpty()) append(" commit=").append(commit)
             }
+        } else if (customOnlyMode()) {
+            customUnavailableSummary()
         } else {
             val jniVersion = getVersionByJni().ifEmpty { "unknown" }
             "backend=jni version=$jniVersion abi=$abi"
@@ -335,6 +358,9 @@ object FrpcCompat {
 
     fun isReady(): Boolean {
         return try {
+            if (customOnlyMode()) {
+                return hasCustomBackend()
+            }
             val version = getVersion()
             version == FRPC_LIB_VERSION || version == FRPC_CUSTOM_VERSION
         } catch (e: Exception) {
@@ -350,6 +376,8 @@ object FrpcCompat {
     fun getVersion(): String {
         return if (hasCustomBackend()) {
             FRPC_CUSTOM_VERSION
+        } else if (customOnlyMode()) {
+            ""
         } else {
             getVersionByJni()
         }
@@ -359,6 +387,8 @@ object FrpcCompat {
         return if (hasCustomBackend()) {
             cleanupProcessMap()
             processMap.keys.sorted().joinToString(",")
+        } else if (customOnlyMode()) {
+            ""
         } else {
             getUidsByJni()
         }
@@ -371,6 +401,8 @@ object FrpcCompat {
             cleanupProcessMap()
             val process = processMap[uid] ?: return false
             isProcessAlive(process)
+        } else if (customOnlyMode()) {
+            false
         } else {
             isRunningByJni(uid)
         }
@@ -389,6 +421,8 @@ object FrpcCompat {
                 Log.e(TAG, "close process error: ${e.message}")
                 false
             }
+        } else if (customOnlyMode()) {
+            false
         } else {
             closeByJni(uid)
         }
@@ -396,6 +430,11 @@ object FrpcCompat {
 
     fun runContent(uid: String, config: String): String {
         if (!hasCustomBackend()) {
+            if (customOnlyMode()) {
+                val detail = withBackendInfo("custom frpc backend unavailable", useCustomBackend = false)
+                setLastError(uid, detail)
+                return detail
+            }
             val error = runContentByJni(uid, config)
             if (error.isNotEmpty()) {
                 val detail = withBackendInfo(error, useCustomBackend = false)
@@ -427,6 +466,11 @@ object FrpcCompat {
 
     fun runFile(uid: String, configPath: String): String {
         if (!hasCustomBackend()) {
+            if (customOnlyMode()) {
+                val detail = withBackendInfo("custom frpc backend unavailable", useCustomBackend = false)
+                setLastError(uid, detail)
+                return detail
+            }
             val error = runFileByJni(uid, configPath)
             if (error.isNotEmpty()) {
                 val detail = withBackendInfo(error, useCustomBackend = false)
@@ -515,13 +559,19 @@ object FrpcCompat {
             val message = e.message ?: "runFile error"
             return if (isBackendStartError(message)) {
                 markCustomBackendUnavailable(message)
-                val fallbackError = runFileByJni(uid, configPath)
-                if (fallbackError.isNotEmpty()) {
-                    val detail = withBackendInfo(fallbackError, useCustomBackend = false)
+                if (customOnlyMode()) {
+                    val detail = withBackendInfo("custom frpc start failed: $message", useCustomBackend = false)
                     setLastError(uid, detail)
                     detail
                 } else {
-                    ""
+                    val fallbackError = runFileByJni(uid, configPath)
+                    if (fallbackError.isNotEmpty()) {
+                        val detail = withBackendInfo(fallbackError, useCustomBackend = false)
+                        setLastError(uid, detail)
+                        detail
+                    } else {
+                        ""
+                    }
                 }
             } else {
                 val detail = withBackendInfo(message, useCustomBackend = true)

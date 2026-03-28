@@ -10,6 +10,7 @@ import androidx.lifecycle.lifecycleScope
 import androidx.recyclerview.widget.RecyclerView.RecycledViewPool
 import com.alibaba.android.vlayout.VirtualLayoutManager
 import cn.ppps.forwarder.App
+import cn.ppps.forwarder.BuildConfig
 import cn.ppps.forwarder.R
 import cn.ppps.forwarder.adapter.FrpcPagingAdapter
 import cn.ppps.forwarder.core.BaseFragment
@@ -153,7 +154,11 @@ class FrpcFragment : BaseFragment<FragmentFrpcsBinding?>(), FrpcPagingAdapter.On
 
             R.id.iv_play -> {
                 if (!App.FrpclibInited) {
-                    XToastUtils.error(String.format(getString(R.string.frpclib_download_title), FRPC_LIB_VERSION))
+                    if (BuildConfig.WITH_FRPC_PACKAGE) {
+                        XToastUtils.error(FrpcCompat.getBackendSummary())
+                    } else {
+                        XToastUtils.error(String.format(getString(R.string.frpclib_download_title), FRPC_LIB_VERSION))
+                    }
                     return
                 }
 
@@ -203,7 +208,11 @@ class FrpcFragment : BaseFragment<FragmentFrpcsBinding?>(), FrpcPagingAdapter.On
 
             else -> {
                 if (!App.FrpclibInited) {
-                    XToastUtils.error(String.format(getString(R.string.frpclib_download_title), FRPC_LIB_VERSION))
+                    if (BuildConfig.WITH_FRPC_PACKAGE) {
+                        XToastUtils.error(FrpcCompat.getBackendSummary())
+                    } else {
+                        XToastUtils.error(String.format(getString(R.string.frpclib_download_title), FRPC_LIB_VERSION))
+                    }
                     return
                 }
 
