@@ -16,6 +16,8 @@ jobs:
     runs-on: ubuntu-latest
     env:
       output: "${{ github.workspace }}/build/app/outputs/apk/release"
+      FRP_REPO: https://github.com/lovitus/frp.git
+      FRP_REF: codex/mix-transport-release
       HAS_KEYSTORE_TOKEN: ${{ secrets.TOKEN != '' }}
     steps:
       # 检出代码
@@ -158,7 +160,8 @@ jobs:
       # 打包 with_frpc（仅额外产出4个非universal架构包）
       - name: Prepare custom frpc assets
         env:
-          FRP_TAG: v0.68.1-mix.19
+          FRP_REPO: ${{ env.FRP_REPO }}
+          FRP_REF: ${{ env.FRP_REF }}
         run: |
           bash scripts/prepare_custom_frpc_assets.sh
 

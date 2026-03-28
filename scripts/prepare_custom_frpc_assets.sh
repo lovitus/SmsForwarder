@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ASSET_ROOT="${ROOT_DIR}/app/src/main/assets/frpc"
-FRP_TAG="${FRP_TAG:-v0.68.1-mix.19}"
-FRP_VERSION="${FRP_TAG#v}"
+FRP_REPO="${FRP_REPO:-https://github.com/lovitus/frp.git}"
+FRP_REF="${FRP_REF:-codex/mix-transport-release}"
 WORK_DIR="$(mktemp -d)"
 
 cleanup() {
@@ -12,13 +12,13 @@ cleanup() {
 }
 trap cleanup EXIT
 
-if ! command -v curl >/dev/null 2>&1; then
-  echo "curl is required" >&2
+if ! command -v git >/dev/null 2>&1; then
+  echo "git is required" >&2
   exit 1
 fi
 
-if ! command -v tar >/dev/null 2>&1; then
-  echo "tar is required" >&2
+if ! command -v go >/dev/null 2>&1; then
+  echo "go is required" >&2
   exit 1
 fi
 
@@ -26,49 +26,35 @@ mkdir -p "${ASSET_ROOT}"
 rm -rf "${ASSET_ROOT}"
 mkdir -p "${ASSET_ROOT}/armeabi-v7a" "${ASSET_ROOT}/arm64-v8a" "${ASSET_ROOT}/x86" "${ASSET_ROOT}/x86_64"
 
-download_and_extract_frpc() {
-  local archive_name="$1"
-  local abi="$2"
-  local archive_path="${WORK_DIR}/${archive_name}"
-  local extract_dir="${WORK_DIR}/extract_${abi}"
-  local download_url="https://github.com/lovitus/frp/releases/download/${FRP_TAG}/${archive_name}"
+echo "Cloning ${FRP_REPO} (${FRP_REF})"
+git clone --depth 1 --branch "${FRP_REF}" "${FRP_REPO}" "${WORK_DIR}/frp-src"
+FRP_COMMIT="$(git -C "${WORK_DIR}/frp-src" rev-parse HEAD)"
 
-  echo "Downloading ${download_url}"
-  curl -fsSL "${download_url}" -o "${archive_path}"
-  mkdir -p "${extract_dir}"
-  tar -xzf "${archive_path}" -C "${extract_dir}"
+build_frpc() {
+  local abi="$1"
+  local goos="$2"
+  local goarch="$3"
+  local goarm="${4:-}"
 
-  local frpc_bin
-  frpc_bin="$(find "${extract_dir}" -type f -name frpc | head -n 1)"
-  if [[ -z "${frpc_bin}" ]]; then
-    echo "frpc binary not found in ${archive_name}" >&2
-    exit 1
-  fi
-
-  cp "${frpc_bin}" "${ASSET_ROOT}/${abi}/frpc"
+  echo "Building frpc for ${abi} (${goos}/${goarch}${goarm:+ GOARM=${goarm}})"
+  (
+    cd "${WORK_DIR}/frp-src"
+    if [[ -n "${goarm}" ]]; then
+      CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" GOARM="${goarm}" \
+        go build -trimpath -ldflags "-s -w" -tags "frpc,noweb" -o "${ASSET_ROOT}/${abi}/frpc" ./cmd/frpc
+    else
+      CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" \
+        go build -trimpath -ldflags "-s -w" -tags "frpc,noweb" -o "${ASSET_ROOT}/${abi}/frpc" ./cmd/frpc
+    fi
+  )
   chmod +x "${ASSET_ROOT}/${abi}/frpc"
 }
 
-# arm64-v8a: 官方 Android 构建
-download_and_extract_frpc "frp_${FRP_VERSION}_android_arm64.tar.gz" "arm64-v8a"
-# armeabi-v7a: 使用静态 linux arm 构建
-download_and_extract_frpc "frp_${FRP_VERSION}_linux_arm.tar.gz" "armeabi-v7a"
-# x86_64: 使用静态 linux amd64 构建
-download_and_extract_frpc "frp_${FRP_VERSION}_linux_amd64.tar.gz" "x86_64"
-
-# x86: lovitus 发布未提供，按同一tag从源码交叉编译
-if ! command -v go >/dev/null 2>&1; then
-  echo "go is required to build x86 frpc binary" >&2
-  exit 1
-fi
-
-echo "Building x86 frpc from source tag ${FRP_TAG}"
-git clone --depth 1 --branch "${FRP_TAG}" https://github.com/lovitus/frp.git "${WORK_DIR}/frp-src"
-(
-  cd "${WORK_DIR}/frp-src"
-  CGO_ENABLED=0 GOOS=linux GOARCH=386 go build -trimpath -ldflags "-s -w" -tags "frpc,noweb" -o "${ASSET_ROOT}/x86/frpc" ./cmd/frpc
-)
-chmod +x "${ASSET_ROOT}/x86/frpc"
+# 从指定分支源码编译 4 架构（不再依赖 tag release 资产）
+build_frpc "arm64-v8a" "android" "arm64"
+build_frpc "armeabi-v7a" "android" "arm" "7"
+build_frpc "x86_64" "android" "amd64"
+build_frpc "x86" "android" "386"
 
 if command -v sha256sum >/dev/null 2>&1; then
   (
@@ -78,9 +64,10 @@ if command -v sha256sum >/dev/null 2>&1; then
 fi
 
 cat > "${ASSET_ROOT}/BUILD_INFO.txt" <<EOF
-frp_tag=${FRP_TAG}
-frp_version=${FRP_VERSION}
-source_release=https://github.com/lovitus/frp/releases/tag/${FRP_TAG}
+frp_repo=${FRP_REPO}
+frp_ref=${FRP_REF}
+frp_commit=${FRP_COMMIT}
+source_tree=https://github.com/lovitus/frp/tree/${FRP_REF}
 generated_at_utc=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
 

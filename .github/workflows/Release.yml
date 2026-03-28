@@ -20,7 +20,8 @@ jobs:
     env:
       OUTPUT_DIR: ${{ github.workspace }}/build/app/outputs/apk/release
       DIST_DIR: ${{ github.workspace }}/dist
-      FRP_TAG: v0.68.1-mix.19
+      FRP_REPO: https://github.com/lovitus/frp.git
+      FRP_REF: codex/mix-transport-release
       HAS_KEYSTORE_TOKEN: ${{ secrets.TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
@@ -89,7 +90,8 @@ jobs:
 
       - name: Build Release (With Custom Frpc)
         env:
-          FRP_TAG: ${{ env.FRP_TAG }}
+          FRP_REPO: ${{ env.FRP_REPO }}
+          FRP_REF: ${{ env.FRP_REF }}
         run: |
           set -euo pipefail
           bash scripts/prepare_custom_frpc_assets.sh
@@ -150,12 +152,10 @@ jobs:
             done
             echo
             echo "## Custom Frpc Source"
-            echo "- Upstream Release: https://github.com/lovitus/frp/releases/tag/${FRP_TAG}"
-            echo "- Tag: \`${FRP_TAG}\`"
-            echo "- arm64-v8a: release asset \`frp_*_android_arm64.tar.gz\`"
-            echo "- armeabi-v7a: release asset \`frp_*_linux_arm.tar.gz\`"
-            echo "- x86_64: release asset \`frp_*_linux_amd64.tar.gz\`"
-            echo "- x86: built from source on same tag using \`GOOS=linux GOARCH=386 CGO_ENABLED=0\`"
+            echo "- Repo: ${FRP_REPO}"
+            echo "- Ref: \`${FRP_REF}\`"
+            echo "- Build method: source build for 4 ABIs (arm64-v8a/armeabi-v7a/x86_64/x86)"
+            echo "- Build flags: \`CGO_ENABLED=0 -trimpath -ldflags \"-s -w\" -tags \"frpc,noweb\"\`"
             if [[ -f "${DIST_DIR}/BUILD_INFO.txt" ]]; then
               echo
               echo "## Frpc Build Info"
