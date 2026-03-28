@@ -167,7 +167,7 @@ jobs:
 
       - name: Build with custom frpc
         run: |
-          bash ./gradlew clean assembleRelease -PexcludeFrpclib=false -PwithFrpcPackage=true
+          bash ./gradlew clean assembleRelease -PexcludeFrpclib=true -PwithFrpcPackage=true
 
       - name: Upload App To Artifact armeabi-v7a with_frpc
         if: success () || failure ()

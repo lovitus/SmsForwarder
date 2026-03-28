@@ -95,7 +95,7 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/prepare_custom_frpc_assets.sh
-          bash ./gradlew clean assembleRelease -PexcludeFrpclib=false -PwithFrpcPackage=true
+          bash ./gradlew clean assembleRelease -PexcludeFrpclib=true -PwithFrpcPackage=true
           mkdir -p "${DIST_DIR}/with_frpc"
           shopt -s nullglob
           for apk in "${OUTPUT_DIR}"/SmsF_*_with_frpc.apk; do
@@ -133,6 +133,8 @@ jobs:
             echo "## Package Matrix"
             echo "- Standard APKs: universal + armeabi-v7a + arm64-v8a + x86 + x86_64"
             echo "- With Frpc APKs: armeabi-v7a + arm64-v8a + x86 + x86_64 (no universal)"
+            echo "- With Frpc runtime: custom-only backend (JNI libgojni.so excluded)"
+            echo "- With Frpc assets: \`assets/frpc/<abi>/frpc.gz\` (runtime extracted to app private dir)"
             echo
             echo "## APK Assets (Standard)"
             shopt -s nullglob

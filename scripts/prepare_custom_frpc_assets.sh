@@ -56,10 +56,23 @@ build_frpc "armeabi-v7a" "linux" "arm" "7"
 build_frpc "x86_64" "linux" "amd64"
 build_frpc "x86" "linux" "386"
 
+compress_frpc_asset() {
+  local abi="$1"
+  local raw_file="${ASSET_ROOT}/${abi}/frpc"
+  local compressed_file="${ASSET_ROOT}/${abi}/frpc.gz"
+  gzip -n -9 -c "${raw_file}" > "${compressed_file}"
+  rm -f "${raw_file}"
+}
+
+compress_frpc_asset "arm64-v8a"
+compress_frpc_asset "armeabi-v7a"
+compress_frpc_asset "x86_64"
+compress_frpc_asset "x86"
+
 if command -v sha256sum >/dev/null 2>&1; then
   (
     cd "${ASSET_ROOT}"
-    sha256sum armeabi-v7a/frpc arm64-v8a/frpc x86/frpc x86_64/frpc > SHA256SUMS.txt
+    sha256sum armeabi-v7a/frpc.gz arm64-v8a/frpc.gz x86/frpc.gz x86_64/frpc.gz > SHA256SUMS.txt
   )
 fi
 

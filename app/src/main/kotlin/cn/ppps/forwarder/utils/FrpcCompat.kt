@@ -8,11 +8,13 @@ import java.io.File
 import java.io.FileOutputStream
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.zip.GZIPInputStream
 
 object FrpcCompat {
 
     private const val TAG = "FrpcCompat"
     private const val CUSTOM_BINARY_NAME = "frpc"
+    private const val CUSTOM_BINARY_COMPRESSED_NAME = "frpc.gz"
     private const val CUSTOM_BINARY_DIR = "libs"
     private const val CUSTOM_BINARY_BUILD_INFO_NAME = "frpc.buildinfo"
     private const val CUSTOM_ASSET_DIR = "frpc"
@@ -176,16 +178,16 @@ object FrpcCompat {
         synchronized(installLock) {
             val customBinary = getCustomBinaryFile()
             val abi = getCurrentAbi()
-            val assetPath = "$CUSTOM_ASSET_DIR/$abi/$CUSTOM_BINARY_NAME"
+            val rawAssetPath = "$CUSTOM_ASSET_DIR/$abi/$CUSTOM_BINARY_NAME"
+            val compressedAssetPath = "$CUSTOM_ASSET_DIR/$abi/$CUSTOM_BINARY_COMPRESSED_NAME"
+            val assetPath = when {
+                isAssetExists(compressedAssetPath) -> compressedAssetPath
+                isAssetExists(rawAssetPath) -> rawAssetPath
+                else -> ""
+            }
             val bundledBuildInfo = readAssetText("$CUSTOM_ASSET_DIR/BUILD_INFO.txt")
             val buildInfoFile = getCustomBinaryBuildInfoFile()
-
-            val hasBundledAsset = try {
-                App.context.assets.open(assetPath).close()
-                true
-            } catch (_: Exception) {
-                false
-            }
+            val hasBundledAsset = assetPath.isNotEmpty()
 
             if (!hasBundledAsset) {
                 if (customBinary.exists()) customBinary.delete()
@@ -205,9 +207,19 @@ object FrpcCompat {
 
             return try {
                 val tempBinary = File(customBinary.parentFile, "${CUSTOM_BINARY_NAME}.tmp")
-                App.context.assets.open(assetPath).use { input ->
-                    FileOutputStream(tempBinary).use { output ->
-                        input.copyTo(output)
+                if (assetPath.endsWith(".gz")) {
+                    App.context.assets.open(assetPath).use { input ->
+                        GZIPInputStream(input).use { gzipInput ->
+                            FileOutputStream(tempBinary).use { output ->
+                                gzipInput.copyTo(output)
+                            }
+                        }
+                    }
+                } else {
+                    App.context.assets.open(assetPath).use { input ->
+                        FileOutputStream(tempBinary).use { output ->
+                            input.copyTo(output)
+                        }
                     }
                 }
                 if (customBinary.exists()) customBinary.delete()
@@ -229,6 +241,16 @@ object FrpcCompat {
                 Log.e(TAG, "install custom frpc failed for abi=$abi: ${e.message}")
                 false
             }
+        }
+    }
+
+    private fun isAssetExists(assetPath: String): Boolean {
+        if (assetPath.isEmpty()) return false
+        return try {
+            App.context.assets.open(assetPath).close()
+            true
+        } catch (_: Exception) {
+            false
         }
     }
 
