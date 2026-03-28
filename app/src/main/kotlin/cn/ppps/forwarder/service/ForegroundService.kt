@@ -56,6 +56,7 @@ import io.reactivex.schedulers.Schedulers
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
 import java.io.File
 
 @SuppressLint("SimpleDateFormat")
@@ -66,6 +67,18 @@ class ForegroundService : Service() {
     private var notificationManager: NotificationManager? = null
 
     private val compositeDisposable = CompositeDisposable()
+    private fun buildFrpcError(uid: String, msg: String?): String {
+        val detail = msg?.trim().orEmpty()
+        if (detail.isNotEmpty()) {
+            return "[$uid] $detail"
+        }
+        val fallback = FrpcCompat.getLastError(uid)
+        if (fallback.isNotEmpty()) {
+            return "[$uid] $fallback"
+        }
+        return "[$uid] unknown frpc error"
+    }
+
     private val frpcObserver = Observer { uid: String ->
         if (!App.FrpclibInited || FrpcCompat.isRunning(uid)) return@Observer
 
@@ -80,15 +93,25 @@ class ForegroundService : Service() {
             override fun onError(e: Throwable) {
                 e.printStackTrace()
                 Log.e(TAG, "onError: ${e.message}")
-                LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post("[$uid] ${e.message ?: "unknown error"}")
+                LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post(buildFrpcError(uid, e.message))
             }
 
             override fun onSuccess(msg: String) {
                 if (!TextUtils.isEmpty(msg)) {
                     Log.e(TAG, msg)
-                    LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post("[$uid] $msg")
+                    LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post(buildFrpcError(uid, msg))
                 } else {
-                    LiveEventBus.get(EVENT_FRPC_RUNNING_SUCCESS, String::class.java).post(uid)
+                    GlobalScope.async(Dispatchers.IO) {
+                        repeat(3) {
+                            if (FrpcCompat.isRunning(uid)) {
+                                LiveEventBus.get(EVENT_FRPC_RUNNING_SUCCESS, String::class.java).post(uid)
+                                return@async
+                            }
+                            delay(500)
+                        }
+                        val detail = FrpcCompat.getLastError(uid).ifEmpty { "frpc exited before ready" }
+                        LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post(buildFrpcError(uid, detail))
+                    }
                 }
             }
         })

@@ -16,6 +16,7 @@ object FrpcCompat {
     private const val CUSTOM_ASSET_DIR = "frpc"
     private const val CONFIG_DIR = "frpc"
     private val processMap = ConcurrentHashMap<String, Process>()
+    private val lastErrorMap = ConcurrentHashMap<String, String>()
     private val installLock = Any()
     @Volatile
     private var customBackendUsable: Boolean? = null
@@ -94,6 +95,22 @@ object FrpcCompat {
     private fun markCustomBackendUnavailable(reason: String) {
         customBackendUsable = false
         Log.e(TAG, "disable custom backend, reason=$reason")
+    }
+
+    private fun setLastError(uid: String, error: String) {
+        if (uid.isEmpty()) return
+        if (error.isBlank()) return
+        lastErrorMap[uid] = error
+    }
+
+    private fun clearLastError(uid: String) {
+        if (uid.isEmpty()) return
+        lastErrorMap.remove(uid)
+    }
+
+    fun getLastError(uid: String): String {
+        if (uid.isEmpty()) return ""
+        return lastErrorMap[uid] ?: ""
     }
 
     private fun probeCustomBackend(customBinary: File): Boolean {
@@ -238,6 +255,7 @@ object FrpcCompat {
         if (uid.isEmpty()) return false
 
         return if (hasCustomBackend()) {
+            clearLastError(uid)
             val process = processMap.remove(uid) ?: return false
             return try {
                 process.destroy()
@@ -253,9 +271,12 @@ object FrpcCompat {
 
     fun runContent(uid: String, config: String): String {
         if (!hasCustomBackend()) {
-            return runContentByJni(uid, config)
+            val error = runContentByJni(uid, config)
+            if (error.isNotEmpty()) setLastError(uid, error) else clearLastError(uid)
+            return error
         }
         if (uid.isEmpty()) return "frpc uid is empty"
+        clearLastError(uid)
 
         val configDir = File(App.context.filesDir, CONFIG_DIR)
         if (!configDir.exists()) {
@@ -267,25 +288,34 @@ object FrpcCompat {
             runFile(uid, configFile.absolutePath)
         } catch (e: Exception) {
             Log.e(TAG, "runContent error: ${e.message}")
-            e.message ?: "runContent error"
+            val error = e.message ?: "runContent error"
+            setLastError(uid, error)
+            error
         }
     }
 
     fun runFile(uid: String, configPath: String): String {
         if (!hasCustomBackend()) {
-            return runFileByJni(uid, configPath)
+            val error = runFileByJni(uid, configPath)
+            if (error.isNotEmpty()) setLastError(uid, error) else clearLastError(uid)
+            return error
         }
         if (uid.isEmpty()) return "frpc uid is empty"
         if (isRunning(uid)) return ""
+        clearLastError(uid)
 
         val configFile = File(configPath)
         if (!configFile.exists()) {
-            return "config file not found: $configPath"
+            val error = "config file not found: $configPath"
+            setLastError(uid, error)
+            return error
         }
 
         val customBinary = getCustomBinaryFile()
         if (!customBinary.exists() || !customBinary.canExecute()) {
-            return "frpc binary not found"
+            val error = "frpc binary not found"
+            setLastError(uid, error)
+            return error
         }
 
         return try {
@@ -308,23 +338,42 @@ object FrpcCompat {
                 }
                 if (isBackendBinaryError(errorMessage)) {
                     markCustomBackendUnavailable(errorMessage)
-                    return runFileByJni(uid, configPath)
+                    val fallbackError = runFileByJni(uid, configPath)
+                    if (fallbackError.isNotEmpty()) setLastError(uid, fallbackError)
+                    return fallbackError
                 }
+                setLastError(uid, errorMessage)
                 return errorMessage
             }
 
             processMap[uid] = process
 
             Thread {
+                val logs = mutableListOf<String>()
                 try {
                     process.inputStream.bufferedReader().useLines { lines ->
                         lines.forEach { line ->
+                            logs.add(line)
                             Log.d(TAG, "[$uid] $line")
                         }
                     }
                 } catch (e: Exception) {
                     Log.e(TAG, "read process logs error: ${e.message}")
                 } finally {
+                    val exitCode = try {
+                        process.exitValue()
+                    } catch (_: IllegalThreadStateException) {
+                        Int.MIN_VALUE
+                    }
+                    if (exitCode != Int.MIN_VALUE && exitCode != 0 && getLastError(uid).isEmpty()) {
+                        val tailLog = logs.takeLast(8).joinToString("\n").trim()
+                        val error = if (tailLog.isEmpty()) {
+                            "frpc exited with code $exitCode"
+                        } else {
+                            "frpc exited with code $exitCode\n$tailLog"
+                        }
+                        setLastError(uid, error)
+                    }
                     processMap.remove(uid)
                 }
             }.start()
@@ -335,8 +384,11 @@ object FrpcCompat {
             val message = e.message ?: "runFile error"
             return if (isBackendBinaryError(message)) {
                 markCustomBackendUnavailable(message)
-                runFileByJni(uid, configPath)
+                val fallbackError = runFileByJni(uid, configPath)
+                if (fallbackError.isNotEmpty()) setLastError(uid, fallbackError)
+                fallbackError
             } else {
+                setLastError(uid, message)
                 message
             }
         }

@@ -129,10 +129,11 @@ class FrpcFragment : BaseFragment<FragmentFrpcsBinding?>(), FrpcPagingAdapter.On
 
         //运行出错时间
         LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).observe(this) {
-            if (it.isNullOrEmpty()) {
-                XToastUtils.error(getString(R.string.frpc_failed_to_run))
+            val detail = it?.trim().orEmpty()
+            if (detail.isNotEmpty()) {
+                XToastUtils.error("${getString(R.string.frpc_failed_to_run)}: $detail")
             } else {
-                XToastUtils.error("${getString(R.string.frpc_failed_to_run)}: $it")
+                XToastUtils.error("${getString(R.string.frpc_failed_to_run)}: unknown error")
             }
             adapter.refresh()
         }
