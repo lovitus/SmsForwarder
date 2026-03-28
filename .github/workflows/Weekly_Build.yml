@@ -16,12 +16,13 @@ jobs:
     runs-on: ubuntu-latest
     env:
       output: "${{ github.workspace }}/build/app/outputs/apk/release"
+      HAS_KEYSTORE_TOKEN: ${{ secrets.TOKEN != '' }}
     steps:
       # 检出代码
       - uses: actions/checkout@v4
       # 删除旧的工作流
       - name: Delete Weekly Build
-        if: ${{ secrets.TOKEN != '' }}
+        if: ${{ env.HAS_KEYSTORE_TOKEN == 'true' }}
         uses: Mattraks/delete-workflow-runs@v2
         with:
           token: ${{ secrets.TOKEN }}
@@ -42,14 +43,14 @@ jobs:
           go-version: '1.22.x'
       # 获取打包秘钥
       - name: Checkout Android Keystore
-        if: ${{ secrets.TOKEN != '' }}
+        if: ${{ env.HAS_KEYSTORE_TOKEN == 'true' }}
         uses: actions/checkout@v4
         with:
           repository: pppscn/keystore
           token: ${{ secrets.TOKEN }} # 连接仓库的token,需要单独配置
           path: keystore # 仓库的根目录名
       - name: Prepare Android Keystore (Fallback)
-        if: ${{ secrets.TOKEN == '' }}
+        if: ${{ env.HAS_KEYSTORE_TOKEN != 'true' }}
         run: |
           set -euo pipefail
           mkdir -p keystore
