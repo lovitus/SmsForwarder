@@ -9,7 +9,7 @@ import cn.ppps.forwarder.App
 import cn.ppps.forwarder.R
 import cn.ppps.forwarder.utils.STATUS_OFF
 import cn.ppps.forwarder.utils.STATUS_ON
-import frpclib.Frpclib
+import cn.ppps.forwarder.utils.FrpcCompat
 import kotlinx.parcelize.Parcelize
 import java.util.Date
 
@@ -35,6 +35,6 @@ data class Frpc(
         }
 
     val status: Int
-        get() = if (connecting || (App.FrpclibInited && Frpclib.isRunning(uid))) STATUS_ON else STATUS_OFF
+        get() = if (connecting || (App.FrpclibInited && FrpcCompat.isRunning(uid))) STATUS_ON else STATUS_OFF
 
 }

@@ -69,7 +69,7 @@ import com.xuexiang.xrouter.utils.TextUtils
 import com.xuexiang.xutil.XUtil
 import com.xuexiang.xutil.data.ConvertTools
 import com.xuexiang.xutil.resource.ResUtils.getString
-import frpclib.Frpclib
+import cn.ppps.forwarder.utils.FrpcCompat
 import java.util.Calendar
 
 //执行每个task具体动作任务
@@ -252,15 +252,15 @@ class ActionWorker(context: Context, params: WorkerParameters) : CoroutineWorker
 
                         for (frpc in frpcList) {
                             if (frpcSetting.action == "start") {
-                                if (!Frpclib.isRunning(frpc.uid)) {
-                                    val error = Frpclib.runContent(frpc.uid, frpc.config)
+                                if (!FrpcCompat.isRunning(frpc.uid)) {
+                                    val error = FrpcCompat.runContent(frpc.uid, frpc.config)
                                     if (!TextUtils.isEmpty(error)) {
                                         Log.e(TAG, error)
                                     }
                                 }
                             } else if (frpcSetting.action == "stop") {
-                                if (Frpclib.isRunning(frpc.uid)) {
-                                    Frpclib.close(frpc.uid)
+                                if (FrpcCompat.isRunning(frpc.uid)) {
+                                    FrpcCompat.close(frpc.uid)
                                 }
                             }
                         }

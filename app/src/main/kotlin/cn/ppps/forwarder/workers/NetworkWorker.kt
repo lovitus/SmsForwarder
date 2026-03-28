@@ -36,18 +36,16 @@ class NetworkWorker(context: Context, params: WorkerParameters) : CoroutineWorke
 
     override suspend fun doWork(): Result {
         try {
-            //获取公网IP地址
-            val ipv4 = getPublicIP(false)
-            TaskUtils.ipv4 = if (ipv4Pattern.matches(ipv4)) ipv4 else ""
-            val ipv6 = getPublicIP(true)
-            TaskUtils.ipv6 = if (ipv6Pattern.matches(ipv6)) ipv6 else ""
-            Log.d(TAG, "ipv4 = $ipv4, ipv6 = $ipv6")
-            //获取所有IP地址
-            val ipList = CommonUtils.getIPAddresses().filter { !isLocalAddress(it) }
-            TaskUtils.ipList = if (ipList.isNotEmpty()) ipList.joinToString("\n") else ""
-
             val conditionType = inputData.getInt(TaskWorker.CONDITION_TYPE, -1)
             val taskList = Core.task.getByType(conditionType)
+            if (taskList.isEmpty()) {
+                Log.d(TAG, "No enabled network task")
+                return Result.success()
+            }
+
+            var networkDetailsLoaded = false
+            var ipv4 = ""
+            var ipv6 = ""
             for (task in taskList) {
                 Log.d(TAG, "task = $task")
 
@@ -72,6 +70,18 @@ class NetworkWorker(context: Context, params: WorkerParameters) : CoroutineWorke
                 if (TaskUtils.networkState != networkSetting.networkState) {
                     Log.d(TAG, "TASK-${task.id}：networkState is not match, networkSetting = $networkSetting")
                     continue
+                }
+
+                //按需获取公网IP与本机IP，避免无匹配任务时无意义唤醒网络
+                if (!networkDetailsLoaded) {
+                    ipv4 = getPublicIP(false)
+                    TaskUtils.ipv4 = if (ipv4Pattern.matches(ipv4)) ipv4 else ""
+                    ipv6 = getPublicIP(true)
+                    TaskUtils.ipv6 = if (ipv6Pattern.matches(ipv6)) ipv6 else ""
+                    val ipList = CommonUtils.getIPAddresses().filter { !isLocalAddress(it) }
+                    TaskUtils.ipList = if (ipList.isNotEmpty()) ipList.joinToString("\n") else ""
+                    networkDetailsLoaded = true
+                    Log.d(TAG, "ipv4 = $ipv4, ipv6 = $ipv6")
                 }
 
                 //TODO：判断其他条件是否满足，注意：延迟5秒（给够搜索信号时间）才执行任务

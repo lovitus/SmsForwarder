@@ -39,7 +39,7 @@ import com.xuexiang.xui.utils.WidgetUtils
 import com.xuexiang.xui.widget.actionbar.TitleBar
 import com.xuexiang.xui.widget.dialog.LoadingDialog
 import com.xuexiang.xutil.system.ClipboardUtils
-import frpclib.Frpclib
+import cn.ppps.forwarder.utils.FrpcCompat
 import io.reactivex.CompletableObserver
 import io.reactivex.Observer
 import io.reactivex.android.schedulers.AndroidSchedulers
@@ -162,8 +162,8 @@ class FrpcFragment : BaseFragment<FragmentFrpcsBinding?>(), FrpcPagingAdapter.On
                     }
                 }
 
-                if (Frpclib.isRunning(item.uid)) {
-                    Frpclib.close(item.uid)
+                if (FrpcCompat.isRunning(item.uid)) {
+                    FrpcCompat.close(item.uid)
                     item.connecting = false
                     LiveEventBus.get<Frpc>(EVENT_FRPC_UPDATE_CONFIG).post(item)
                     return
@@ -203,7 +203,7 @@ class FrpcFragment : BaseFragment<FragmentFrpcsBinding?>(), FrpcPagingAdapter.On
                 }
 
                 //编辑或删除需要先停止客户端
-                if (Frpclib.isRunning(item.uid)) {
+                if (FrpcCompat.isRunning(item.uid)) {
                     XToastUtils.warning(R.string.tipServiceRunning)
                     return
                 }

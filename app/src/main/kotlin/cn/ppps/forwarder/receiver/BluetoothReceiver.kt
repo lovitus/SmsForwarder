@@ -15,6 +15,7 @@ import androidx.work.WorkManager
 import androidx.work.workDataOf
 import com.google.gson.Gson
 import cn.ppps.forwarder.App
+import cn.ppps.forwarder.core.Core
 import cn.ppps.forwarder.service.BluetoothScanService
 import cn.ppps.forwarder.utils.ACTION_RESTART
 import cn.ppps.forwarder.utils.ACTION_START
@@ -191,6 +192,7 @@ class BluetoothReceiver : BroadcastReceiver() {
 
     // 发送任务请求
     private fun handleWorkRequest(context: Context, action: String, msg: String) {
+        if (!Core.task.hasByType(TASK_CONDITION_BLUETOOTH)) return
         val request = OneTimeWorkRequestBuilder<BluetoothWorker>()
             .setInputData(
                 workDataOf(

@@ -5,9 +5,11 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
+import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import cn.ppps.forwarder.core.Core
 import cn.ppps.forwarder.utils.Log
 import cn.ppps.forwarder.utils.TASK_CONDITION_LOCK_SCREEN
 import cn.ppps.forwarder.utils.TaskWorker
@@ -22,6 +24,7 @@ class LockScreenReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
 
         if (context == null || (intent?.action != Intent.ACTION_SCREEN_OFF && intent?.action != Intent.ACTION_SCREEN_ON && intent?.action != Intent.ACTION_USER_PRESENT)) return
+        if (!Core.task.hasByType(TASK_CONDITION_LOCK_SCREEN)) return
 
         var action = intent.action.toString()
         if (action == Intent.ACTION_SCREEN_OFF && isDeviceLocked(context)) {
@@ -36,7 +39,11 @@ class LockScreenReceiver : BroadcastReceiver() {
                 TaskWorker.ACTION to action,
             )
         ).build()
-        WorkManager.getInstance(context).enqueue(request)
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "lock_screen_${action}",
+            ExistingWorkPolicy.REPLACE,
+            request
+        )
     }
 
     private fun isDeviceLocked(context: Context?): Boolean {

@@ -268,7 +268,9 @@ class MainActivity : BaseActivity<ActivityMainBinding?>(), DrawerAdapter.OnItemS
                     return
                 }
 
-                val title = if (!FileUtils.isFileExists(filesDir.absolutePath + "/libs/libgojni.so")) {
+                val hasLegacyLib = FileUtils.isFileExists(filesDir.absolutePath + "/libs/libgojni.so")
+                val hasCustomBinary = FileUtils.isFileExists(filesDir.absolutePath + "/libs/frpc")
+                val title = if (!hasLegacyLib && !hasCustomBinary) {
                     String.format(getString(R.string.frpclib_download_title), FRPC_LIB_VERSION)
                 } else {
                     getString(R.string.frpclib_version_mismatch)

@@ -14,7 +14,7 @@ import cn.ppps.forwarder.adapter.FrpcPagingAdapter.MyViewHolder
 import cn.ppps.forwarder.database.entity.Frpc
 import cn.ppps.forwarder.databinding.AdapterFrpcsCardViewListItemBinding
 import com.xuexiang.xutil.resource.ResUtils.getColors
-import frpclib.Frpclib
+import cn.ppps.forwarder.utils.FrpcCompat
 
 @Suppress("EmptyMethod")
 class FrpcPagingAdapter(private val itemClickListener: OnItemClickListener) : PagingDataAdapter<Frpc, MyViewHolder>(diffCallback) {
@@ -32,7 +32,7 @@ class FrpcPagingAdapter(private val itemClickListener: OnItemClickListener) : Pa
             holder.binding.tvUid.text = "UID:${item.uid}"
             holder.binding.tvName.text = item.name
 
-            if (item.connecting || (App.FrpclibInited && Frpclib.isRunning(item.uid))) {
+            if (item.connecting || (App.FrpclibInited && FrpcCompat.isRunning(item.uid))) {
                 holder.binding.ivPlay.setImageResource(R.drawable.ic_stop)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                     holder.binding.ivPlay.imageTintList = getColors(R.color.colorStop)

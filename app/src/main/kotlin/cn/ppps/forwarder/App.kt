@@ -46,7 +46,6 @@ import cn.ppps.forwarder.utils.CactusSave
 import cn.ppps.forwarder.utils.FRONT_CHANNEL_ID
 import cn.ppps.forwarder.utils.FRONT_CHANNEL_NAME
 import cn.ppps.forwarder.utils.FRONT_NOTIFY_ID
-import cn.ppps.forwarder.utils.FRPC_LIB_VERSION
 import cn.ppps.forwarder.utils.HistoryUtils
 import cn.ppps.forwarder.utils.HttpServerUtils
 import cn.ppps.forwarder.utils.Log
@@ -56,10 +55,8 @@ import cn.ppps.forwarder.utils.SharedPreference
 import cn.ppps.forwarder.utils.sdkinit.UMengInit
 import cn.ppps.forwarder.utils.sdkinit.XBasicLibInit
 import cn.ppps.forwarder.utils.sdkinit.XUpdateInit
-import cn.ppps.forwarder.utils.tinker.TinkerLoadLibrary
 import com.king.location.LocationClient
-import com.xuexiang.xutil.file.FileUtils
-import frpclib.Frpclib
+import cn.ppps.forwarder.utils.FrpcCompat
 import io.reactivex.Observable
 import io.reactivex.android.schedulers.AndroidSchedulers
 import io.reactivex.disposables.Disposable
@@ -186,17 +183,9 @@ class App : Application(), CactusCallback, Configuration.Provider by Core {
             //初始化WorkManager
             WorkManager.initialize(this, Configuration.Builder().build())
 
-            //动态加载FrpcLib
-            val libPath = filesDir.absolutePath + "/libs"
-            val soFile = File(libPath)
-            if (soFile.exists()) {
-                try {
-                    TinkerLoadLibrary.installNativeLibraryPath(classLoader, soFile)
-                    FrpclibInited = FileUtils.isFileExists(filesDir.absolutePath + "/libs/libgojni.so") && FRPC_LIB_VERSION == Frpclib.getVersion()
-                } catch (throwable: Throwable) {
-                    Log.e("APP", throwable.message.toString())
-                }
-            }
+            //优先尝试安装并使用定制frpc二进制，未命中时回退到原JNI方案
+            FrpcCompat.ensureCustomBinaryInstalled()
+            FrpclibInited = FrpcCompat.isReady()
 
             //启动前台服务
             val foregroundServiceIntent = Intent(this, ForegroundService::class.java)

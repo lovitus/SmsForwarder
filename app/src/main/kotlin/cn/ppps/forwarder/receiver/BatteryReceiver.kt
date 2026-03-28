@@ -8,6 +8,7 @@ import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import cn.ppps.forwarder.core.Core
 import cn.ppps.forwarder.utils.BatteryUtils
 import cn.ppps.forwarder.utils.Log
 import cn.ppps.forwarder.utils.TASK_CONDITION_BATTERY
@@ -24,6 +25,19 @@ class BatteryReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context?, intent: Intent?) {
 
         if (context == null || intent?.action != Intent.ACTION_BATTERY_CHANGED) return
+
+        val hasBatteryTask = try {
+            Core.task.hasByType(TASK_CONDITION_BATTERY)
+        } catch (e: Exception) {
+            Log.e(TAG, "query battery task failed: ${e.message}")
+            false
+        }
+        val hasChargeTask = try {
+            Core.task.hasByType(TASK_CONDITION_CHARGE)
+        } catch (e: Exception) {
+            Log.e(TAG, "query charge task failed: ${e.message}")
+            false
+        }
 
         val batteryInfo = BatteryUtils.getBatteryInfo(intent).toString()
         TaskUtils.batteryInfo = batteryInfo
@@ -47,7 +61,7 @@ class BatteryReceiver : BroadcastReceiver() {
         TaskUtils.batteryStatus = statusNew
 
         //电量改变
-        if (isLevelChanged) {
+        if (isLevelChanged && hasBatteryTask) {
             Log.d(TAG, "电量改变")
             val request = OneTimeWorkRequestBuilder<BatteryWorker>().setInputData(
                 workDataOf(
@@ -57,11 +71,15 @@ class BatteryReceiver : BroadcastReceiver() {
                     "level_old" to levelOld,
                 )
             ).build()
-            WorkManager.getInstance(context).enqueue(request)
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                "battery_level_changed",
+                ExistingWorkPolicy.REPLACE,
+                request
+            )
         }
 
         //充电状态改变
-        if (isPluggedChanged || isStatusChanged) {
+        if ((isPluggedChanged || isStatusChanged) && hasChargeTask) {
             Log.d(TAG, "充电状态改变")
             val inputData = workDataOf(
                 TaskWorker.CONDITION_TYPE to TASK_CONDITION_CHARGE,
@@ -70,19 +88,14 @@ class BatteryReceiver : BroadcastReceiver() {
                 "plugged_new" to pluggedNew,
                 "plugged_old" to pluggedOld,
             )
-            // 使用 hashcode 生成唯一的标识符
-            val inputDataHash = inputData.hashCode().toString()
-            // 检查是否已经存在具有相同输入数据的工作
-            val existingWorkPolicy = if (WorkManager.getInstance(context).getWorkInfosByTag(inputDataHash).get().isEmpty()) {
-                ExistingWorkPolicy.REPLACE
-            } else {
-                ExistingWorkPolicy.KEEP
-            }
             val request = OneTimeWorkRequestBuilder<BatteryWorker>()
                 .setInputData(inputData)
-                .addTag(inputDataHash)
                 .build()
-            WorkManager.getInstance(context).enqueueUniqueWork(inputDataHash, existingWorkPolicy, request)
+            WorkManager.getInstance(context).enqueueUniqueWork(
+                "battery_charge_changed",
+                ExistingWorkPolicy.REPLACE,
+                request
+            )
         }
 
     }

@@ -13,9 +13,11 @@ import android.os.Build
 import android.telephony.SubscriptionInfo
 import android.telephony.SubscriptionManager
 import androidx.annotation.RequiresApi
+import androidx.work.ExistingWorkPolicy
 import androidx.work.OneTimeWorkRequestBuilder
 import androidx.work.WorkManager
 import androidx.work.workDataOf
+import cn.ppps.forwarder.core.Core
 import cn.ppps.forwarder.utils.DELAY_TIME_AFTER_SIM_READY
 import cn.ppps.forwarder.utils.Log
 import cn.ppps.forwarder.utils.TASK_CONDITION_NETWORK
@@ -82,6 +84,10 @@ class NetworkChangeReceiver : BroadcastReceiver() {
             Log.d(TAG, "Network State Not Changed")
             return
         }
+        if (!Core.task.hasByType(TASK_CONDITION_NETWORK)) {
+            Log.d(TAG, "No enabled network task")
+            return
+        }
 
         //【注意】延迟5秒（给够搜索信号时间）才执行任务
         val request = OneTimeWorkRequestBuilder<NetworkWorker>()
@@ -91,7 +97,11 @@ class NetworkChangeReceiver : BroadcastReceiver() {
                     TaskWorker.CONDITION_TYPE to TASK_CONDITION_NETWORK,
                 )
             ).build()
-        WorkManager.getInstance(context).enqueue(request)
+        WorkManager.getInstance(context).enqueueUniqueWork(
+            "network_state_changed",
+            ExistingWorkPolicy.REPLACE,
+            request
+        )
     }
 
     private fun handleWifiStateChanged(context: Context, intent: Intent) {

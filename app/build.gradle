@@ -24,6 +24,8 @@ ext.enableXaop = gradle.startParameter.taskNames.any { name ->
     name.toLowerCase().contains("release")
 }
 println "[XAOP] enable = ${enableXaop}, tasks = ${gradle.startParameter.taskNames}"
+def withFrpcPackage = (project.findProperty("withFrpcPackage") ?: "false").toString().toBoolean()
+println "[FRPC] withFrpcPackage = ${withFrpcPackage}"
 
 def keyProps = new Properties()
 def keyPropsFile = rootProject.file('keystore/keystore.properties')
@@ -209,7 +211,8 @@ android {
             def abiName = output.getFilter(com.android.build.OutputFile.ABI)
             if (abiName == null) abiName = "universal"
             output.versionCodeOverride = abiCodes.get(abiName, 0) * 100000 + variant.versionCode
-            output.outputFileName = "SmsF_${versionName}_${output.versionCode}_${abiName}_${variant.name}.apk"
+            def frpcSuffix = withFrpcPackage ? "_with_frpc" : ""
+            output.outputFileName = "SmsF_${versionName}_${output.versionCode}_${abiName}_${variant.name}${frpcSuffix}.apk"
 
             // 修改 output-metadata.json 追加编译日期、编译时间、Git Commit ID
             def assembleTaskName = "assemble${variant.name.capitalize()}"

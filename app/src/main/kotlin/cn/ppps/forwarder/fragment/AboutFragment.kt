@@ -27,7 +27,7 @@ import com.xuexiang.xui.widget.actionbar.TitleBar
 import com.xuexiang.xui.widget.dialog.materialdialog.DialogAction
 import com.xuexiang.xui.widget.dialog.materialdialog.MaterialDialog
 import com.xuexiang.xui.widget.textview.supertextview.SuperTextView
-import frpclib.Frpclib
+import cn.ppps.forwarder.utils.FrpcCompat
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -57,7 +57,7 @@ class AboutFragment : BaseFragment<FragmentAboutBinding?>(), SuperTextView.OnSup
         binding!!.menuCache.setLeftString(String.format(resources.getString(R.string.about_cache_size), CacheUtils.getTotalCacheSize(requireContext())))
 
         if (App.FrpclibInited) {
-            binding!!.menuFrpc.setLeftString(String.format(resources.getString(R.string.about_frpc_version), Frpclib.getVersion()))
+            binding!!.menuFrpc.setLeftString(String.format(resources.getString(R.string.about_frpc_version), FrpcCompat.getVersion()))
             binding!!.menuFrpc.visibility = View.VISIBLE
         }
 
@@ -91,8 +91,11 @@ class AboutFragment : BaseFragment<FragmentAboutBinding?>(), SuperTextView.OnSup
         }
         binding!!.btnFrpc.setOnClickListener {
             try {
-                val soFile = File(context?.filesDir?.absolutePath + "/libs/libgojni.so")
+                val libsDir = File(context?.filesDir?.absolutePath + "/libs")
+                val soFile = File(libsDir, "libgojni.so")
+                val customBinary = File(libsDir, "frpc")
                 if (soFile.exists()) soFile.delete()
+                if (customBinary.exists()) customBinary.delete()
                 MaterialDialog.Builder(requireContext())
                     .iconRes(R.drawable.ic_menu_frpc)
                     .title(R.string.menu_frpc)

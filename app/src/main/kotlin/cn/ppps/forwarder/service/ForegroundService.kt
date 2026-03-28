@@ -46,7 +46,7 @@ import cn.ppps.forwarder.utils.task.CronJobScheduler
 import cn.ppps.forwarder.workers.LoadAppListWorker
 import com.jeremyliao.liveeventbus.LiveEventBus
 import com.xuexiang.xutil.XUtil
-import frpclib.Frpclib
+import cn.ppps.forwarder.utils.FrpcCompat
 import io.reactivex.Single
 import io.reactivex.SingleObserver
 import io.reactivex.android.schedulers.AndroidSchedulers
@@ -67,10 +67,10 @@ class ForegroundService : Service() {
 
     private val compositeDisposable = CompositeDisposable()
     private val frpcObserver = Observer { uid: String ->
-        if (!App.FrpclibInited || Frpclib.isRunning(uid)) return@Observer
+        if (!App.FrpclibInited || FrpcCompat.isRunning(uid)) return@Observer
 
         Core.frpc.get(uid).flatMap { (uid1, _, config) ->
-            val error = Frpclib.runContent(uid1, config)
+            val error = FrpcCompat.runContent(uid1, config)
             Single.just(error)
         }.subscribeOn(Schedulers.io()).observeOn(AndroidSchedulers.mainThread()).subscribe(object : SingleObserver<String> {
             override fun onSubscribe(d: Disposable) {
@@ -305,7 +305,7 @@ class ForegroundService : Service() {
                     for (frpc in frpcList) {
                         Log.d(TAG, "自启动的Frpc: $frpc")
                         GlobalScope.async(Dispatchers.IO) {
-                            val error = Frpclib.runContent(frpc.uid, frpc.config)
+                            val error = FrpcCompat.runContent(frpc.uid, frpc.config)
                             Log.d(TAG, "自启动的Frpc: uid=${frpc.uid}, error=$error")
                             if (!TextUtils.isEmpty(error)) {
                                 Log.e(TAG, error)

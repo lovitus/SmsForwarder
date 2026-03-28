@@ -36,4 +36,8 @@ class TaskRepository(private val taskDao: TaskDao) {
 
     fun getByType(type: Int): List<Task> = taskDao.getByType(type)
 
+    fun hasByType(type: Int): Boolean = taskDao.hasByType(type)
+
+    fun hasByTypes(types: List<Int>): Boolean = taskDao.hasByTypes(types)
+
 }

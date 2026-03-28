@@ -59,4 +59,10 @@ interface TaskDao {
     @Query("SELECT * FROM Task WHERE status = 1 AND type = :taskType")
     fun getByType(taskType: Int): List<Task>
 
+    @Query("SELECT EXISTS(SELECT 1 FROM Task WHERE status = 1 AND type = :taskType)")
+    fun hasByType(taskType: Int): Boolean
+
+    @Query("SELECT EXISTS(SELECT 1 FROM Task WHERE status = 1 AND type IN (:taskTypes))")
+    fun hasByTypes(taskTypes: List<Int>): Boolean
+
 }

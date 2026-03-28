@@ -35,6 +35,10 @@ jobs:
           distribution: 'zulu'
           java-version: '11'
           java-package: jdk
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22.x'
       # 获取打包秘钥
       - name: Checkout Android Keystore
         uses: actions/checkout@v4
@@ -126,3 +130,47 @@ jobs:
         with:
           name: "SmsF_${{ env.ver_name }}_500${{ env.ver_code }}_x86_64_release.apk"
           path: "${{ env.output }}/SmsF_*_x86_64_release.apk"
+
+      # 打包 with_frpc（仅额外产出4个非universal架构包）
+      - name: Prepare custom frpc assets
+        env:
+          FRP_TAG: v0.68.1-mix.19
+        run: |
+          bash scripts/prepare_custom_frpc_assets.sh
+
+      - name: Build with custom frpc
+        run: |
+          bash ./gradlew clean assembleRelease -PexcludeFrpclib=false -PwithFrpcPackage=true
+
+      - name: Upload App To Artifact armeabi-v7a with_frpc
+        if: success () || failure ()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "SmsF_${{ env.ver_name }}_200${{ env.ver_code }}_armeabi-v7a_release_with_frpc.apk"
+          path: "${{ env.output }}/SmsF_*_armeabi-v7a_release_with_frpc.apk"
+
+      - name: Upload App To Artifact arm64-v8a with_frpc
+        if: success () || failure ()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "SmsF_${{ env.ver_name }}_300${{ env.ver_code }}_arm64-v8a_release_with_frpc.apk"
+          path: "${{ env.output }}/SmsF_*_arm64-v8a_release_with_frpc.apk"
+
+      - name: Upload App To Artifact x86 with_frpc
+        if: success () || failure ()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "SmsF_${{ env.ver_name }}_400${{ env.ver_code }}_x86_release_with_frpc.apk"
+          path: "${{ env.output }}/SmsF_*_x86_release_with_frpc.apk"
+
+      - name: Upload App To Artifact x86_64 with_frpc
+        if: success () || failure ()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "SmsF_${{ env.ver_name }}_500${{ env.ver_code }}_x86_64_release_with_frpc.apk"
+          path: "${{ env.output }}/SmsF_*_x86_64_release_with_frpc.apk"
+
+      - name: Cleanup custom frpc assets
+        if: always()
+        run: |
+          bash scripts/cleanup_custom_frpc_assets.sh || true

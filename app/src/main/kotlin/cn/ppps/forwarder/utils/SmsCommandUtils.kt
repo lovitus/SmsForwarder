@@ -15,7 +15,7 @@ import com.xuexiang.xrouter.utils.TextUtils
 import com.xuexiang.xutil.XUtil
 import com.xuexiang.xutil.security.CipherUtils
 import com.xuexiang.xutil.system.DeviceUtils
-import frpclib.Frpclib
+import cn.ppps.forwarder.utils.FrpcCompat
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.async
@@ -63,15 +63,15 @@ class SmsCommandUtils {
 
                         for (frpc in frpcList) {
                             if (action == "start") {
-                                if (!Frpclib.isRunning(frpc.uid)) {
-                                    val error = Frpclib.runContent(frpc.uid, frpc.config)
+                                if (!FrpcCompat.isRunning(frpc.uid)) {
+                                    val error = FrpcCompat.runContent(frpc.uid, frpc.config)
                                     if (!TextUtils.isEmpty(error)) {
                                         Log.e(TAG, error)
                                     }
                                 }
                             } else if (action == "stop") {
-                                if (Frpclib.isRunning(frpc.uid)) {
-                                    Frpclib.close(frpc.uid)
+                                if (FrpcCompat.isRunning(frpc.uid)) {
+                                    FrpcCompat.close(frpc.uid)
                                 }
                             }
                         }

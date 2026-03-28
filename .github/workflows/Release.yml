@@ -1,58 +1,164 @@
 name: Release
 
-# 触发器
 on:
   push:
     tags:
       - v*
-  pull_request:
-    tags:
-      - v*
   workflow_dispatch:
     inputs:
-      root_sol:
-        description: "Release Title"
-        required: true
-        default: "SmsForwarder"
+      release_tag:
+        description: "Release tag (e.g. v3.5.0-custom.1). Empty means auto-generate."
+        required: false
+        default: ""
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      OUTPUT_DIR: ${{ github.workspace }}/build/app/outputs/apk/release
+      DIST_DIR: ${{ github.workspace }}/dist
+      FRP_TAG: v0.68.1-mix.19
     steps:
-      # 检出代码
       - uses: actions/checkout@v4
-      # 设置jdk环境为11
-      - name: set up JDK 11
+
+      - name: Set up JDK 11
         uses: actions/setup-java@v4
         with:
-          distribution: 'zulu'
-          java-version: '11'
+          distribution: "zulu"
+          java-version: "11"
           java-package: jdk
-      # 获取打包秘钥
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.22.x"
+
       - name: Checkout Android Keystore
         uses: actions/checkout@v4
         with:
           repository: pppscn/keystore
-          token: ${{ secrets.TOKEN }} # 连接仓库的token,需要单独配置
-          path: keystore # 仓库的根目录名
-      # 打包release
-      - name: Build with Gradle
-        run: bash ./gradlew assembleRelease
-      # 创建release
-      - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
+          token: ${{ secrets.TOKEN }}
+          path: keystore
+
+      - name: Resolve Release Tag
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG_NAME="${GITHUB_REF_NAME}"
+          elif [[ -n "${{ github.event.inputs.release_tag }}" ]]; then
+            TAG_NAME="${{ github.event.inputs.release_tag }}"
+          else
+            TAG_NAME="vmanual-$(date -u +%Y%m%d-%H%M%S)"
+          fi
+          echo "TAG_NAME=${TAG_NAME}" >> "${GITHUB_ENV}"
+          echo "Using tag: ${TAG_NAME}"
+
+      - name: Build Release (No Frpc)
+        run: |
+          set -euo pipefail
+          bash scripts/cleanup_custom_frpc_assets.sh || true
+          bash ./gradlew clean assembleRelease -PexcludeFrpclib=true -PwithFrpcPackage=false
+          mkdir -p "${DIST_DIR}/no_frpc"
+          cp -v "${OUTPUT_DIR}"/SmsF_*_release.apk "${DIST_DIR}/no_frpc/" || true
+
+      - name: Build Release (With Custom Frpc)
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          FRP_TAG: ${{ env.FRP_TAG }}
+        run: |
+          set -euo pipefail
+          bash scripts/prepare_custom_frpc_assets.sh
+          bash ./gradlew clean assembleRelease -PexcludeFrpclib=false -PwithFrpcPackage=true
+          mkdir -p "${DIST_DIR}/with_frpc"
+          shopt -s nullglob
+          for apk in "${OUTPUT_DIR}"/SmsF_*_with_frpc.apk; do
+            if [[ "${apk}" == *"_universal_"* ]]; then
+              continue
+            fi
+            cp -v "${apk}" "${DIST_DIR}/with_frpc/"
+          done
+          cp -v app/src/main/assets/frpc/BUILD_INFO.txt "${DIST_DIR}/" || true
+          cp -v app/src/main/assets/frpc/SHA256SUMS.txt "${DIST_DIR}/" || true
+          bash scripts/cleanup_custom_frpc_assets.sh
+
+      - name: Verify Output Files
+        run: |
+          set -euo pipefail
+          echo "No Frpc APKs:"
+          ls -lah "${DIST_DIR}/no_frpc"
+          echo "With Frpc APKs:"
+          ls -lah "${DIST_DIR}/with_frpc"
+          test -n "$(ls -1 "${DIST_DIR}/no_frpc"/*.apk 2>/dev/null || true)"
+          test -n "$(ls -1 "${DIST_DIR}/with_frpc"/*.apk 2>/dev/null || true)"
+
+      - name: Generate Release Notes
+        run: |
+          set -euo pipefail
+          NOTES_FILE="${DIST_DIR}/release_notes.md"
+          {
+            echo "# SmsForwarder ${TAG_NAME}"
+            echo
+            echo "## Build Summary"
+            echo "- Commit: \`${GITHUB_SHA}\`"
+            echo "- Workflow: \`${GITHUB_WORKFLOW}\` #${GITHUB_RUN_NUMBER}"
+            echo "- Build Time (UTC): $(date -u +"%Y-%m-%d %H:%M:%S")"
+            echo
+            echo "## Package Matrix"
+            echo "- Standard APKs: universal + armeabi-v7a + arm64-v8a + x86 + x86_64"
+            echo "- With Frpc APKs: armeabi-v7a + arm64-v8a + x86 + x86_64 (no universal)"
+            echo
+            echo "## APK Assets (Standard)"
+            shopt -s nullglob
+            for apk in "${DIST_DIR}/no_frpc"/*.apk; do
+              file_name="$(basename "${apk}")"
+              file_size="$(du -h "${apk}" | awk '{print $1}')"
+              file_sha="$(sha256sum "${apk}" | awk '{print $1}')"
+              echo "- \`${file_name}\` | ${file_size} | \`${file_sha}\`"
+            done
+            echo
+            echo "## APK Assets (With Frpc)"
+            for apk in "${DIST_DIR}/with_frpc"/*.apk; do
+              file_name="$(basename "${apk}")"
+              file_size="$(du -h "${apk}" | awk '{print $1}')"
+              file_sha="$(sha256sum "${apk}" | awk '{print $1}')"
+              echo "- \`${file_name}\` | ${file_size} | \`${file_sha}\`"
+            done
+            echo
+            echo "## Custom Frpc Source"
+            echo "- Upstream Release: https://github.com/lovitus/frp/releases/tag/${FRP_TAG}"
+            echo "- Tag: \`${FRP_TAG}\`"
+            echo "- arm64-v8a: release asset \`frp_*_android_arm64.tar.gz\`"
+            echo "- armeabi-v7a: release asset \`frp_*_linux_arm.tar.gz\`"
+            echo "- x86_64: release asset \`frp_*_linux_amd64.tar.gz\`"
+            echo "- x86: built from source on same tag using \`GOOS=linux GOARCH=386 CGO_ENABLED=0\`"
+            if [[ -f "${DIST_DIR}/BUILD_INFO.txt" ]]; then
+              echo
+              echo "## Frpc Build Info"
+              echo '```'
+              cat "${DIST_DIR}/BUILD_INFO.txt"
+              echo '```'
+            fi
+            if [[ -f "${DIST_DIR}/SHA256SUMS.txt" ]]; then
+              echo
+              echo "## Custom Frpc SHA256"
+              echo '```'
+              cat "${DIST_DIR}/SHA256SUMS.txt"
+              echo '```'
+            fi
+          } > "${NOTES_FILE}"
+
+      - name: Create/Update GitHub Release
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref }}
-          release_name: SmsForwarder ${{ github.ref }}
+          tag_name: ${{ env.TAG_NAME }}
+          target_commitish: ${{ github.sha }}
+          name: SmsForwarder ${{ env.TAG_NAME }}
+          body_path: ${{ env.DIST_DIR }}/release_notes.md
           draft: false
           prerelease: false
-      # 上传至release的资源
-      - name: Upload release binaries
-        uses: alexellis/upload-assets@0.2.2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          asset_paths: '["./build/app/outputs/apk/release/SmsF_*"]'
+          files: |
+            ${{ env.DIST_DIR }}/no_frpc/*.apk
+            ${{ env.DIST_DIR }}/with_frpc/*.apk
+            ${{ env.DIST_DIR }}/BUILD_INFO.txt
+            ${{ env.DIST_DIR }}/SHA256SUMS.txt
