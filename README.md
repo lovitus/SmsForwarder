@@ -76,6 +76,14 @@
 
 --------
 
+## Fork 运维文档（定制 frpc）
+
+> ⚠ 定制 frpc 方案总结与运维手册：[`docs/FRPC_Custom_Build_and_Ops_ZH.md`](docs/FRPC_Custom_Build_and_Ops_ZH.md)
+
+> ⚠ 上游同步详细指南（merge upstream -> fork）：[`docs/Fork_Upstream_Merge_Guide_ZH.md`](docs/Fork_Upstream_Merge_Guide_ZH.md)
+
+--------
+
 ## 反馈与建议：
 
 + 提交issues 或 pr
