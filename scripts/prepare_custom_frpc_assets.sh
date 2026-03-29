@@ -3,6 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ASSET_ROOT="${ROOT_DIR}/app/src/main/assets/frpc"
+JNILIB_ROOT="${ROOT_DIR}/app/src/main/jniLibs_custom"
 FRP_REPO="${FRP_REPO:-https://github.com/lovitus/frp.git}"
 FRP_REF="${FRP_REF:-codex/mix-transport-release}"
 WORK_DIR="$(mktemp -d)"
@@ -25,6 +26,8 @@ fi
 mkdir -p "${ASSET_ROOT}"
 rm -rf "${ASSET_ROOT}"
 mkdir -p "${ASSET_ROOT}/armeabi-v7a" "${ASSET_ROOT}/arm64-v8a" "${ASSET_ROOT}/x86" "${ASSET_ROOT}/x86_64"
+rm -rf "${JNILIB_ROOT}"
+mkdir -p "${JNILIB_ROOT}/armeabi-v7a" "${JNILIB_ROOT}/arm64-v8a" "${JNILIB_ROOT}/x86" "${JNILIB_ROOT}/x86_64"
 
 echo "Cloning ${FRP_REPO} (${FRP_REF})"
 git clone --depth 1 --branch "${FRP_REF}" "${FRP_REPO}" "${WORK_DIR}/frp-src"
@@ -48,6 +51,8 @@ build_frpc() {
     fi
   )
   chmod +x "${ASSET_ROOT}/${abi}/frpc"
+  cp "${ASSET_ROOT}/${abi}/frpc" "${JNILIB_ROOT}/${abi}/libfrpc.so"
+  chmod +x "${JNILIB_ROOT}/${abi}/libfrpc.so"
 }
 
 # 从指定分支源码编译 4 架构（使用静态 linux 目标，兼容 Android 运行环境）
@@ -87,5 +92,8 @@ EOF
 
 echo "Prepared asset files:"
 find "${ASSET_ROOT}" -maxdepth 2 -type f | sort
+
+echo "Prepared native binary files:"
+find "${JNILIB_ROOT}" -maxdepth 2 -type f | sort
 
 echo "Custom frpc assets prepared at ${ASSET_ROOT}"

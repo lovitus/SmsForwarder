@@ -239,6 +239,9 @@ android {
     sourceSets {
         main {
             jniLibs.srcDirs = ['libs']
+            if (withFrpcPackage) {
+                jniLibs.srcDirs += ['src/main/jniLibs_custom']
+            }
         }
     }
     lint {

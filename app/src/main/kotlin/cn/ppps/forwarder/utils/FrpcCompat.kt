@@ -17,6 +17,7 @@ object FrpcCompat {
     private const val CUSTOM_BINARY_NAME = "frpc"
     private const val CUSTOM_BINARY_PACKED_NAME = "frpc.bin"
     private const val CUSTOM_BINARY_COMPRESSED_NAME = "frpc.gz"
+    private const val CUSTOM_NATIVE_BINARY_NAME = "libfrpc.so"
     private const val CUSTOM_BINARY_DIR = "libs"
     private const val CUSTOM_BINARY_BUILD_INFO_NAME = "frpc.buildinfo"
     private const val CUSTOM_ASSET_DIR = "frpc"
@@ -53,6 +54,25 @@ object FrpcCompat {
             dir.mkdirs()
         }
         return File(dir, CUSTOM_BINARY_NAME)
+    }
+
+    private fun getNativeCustomBinaryFile(): File? {
+        val nativeDir = App.context.applicationInfo.nativeLibraryDir ?: return null
+        if (nativeDir.isBlank()) return null
+        return File(nativeDir, CUSTOM_NATIVE_BINARY_NAME)
+    }
+
+    private fun hasNativeCustomBinary(): Boolean {
+        val nativeBinary = getNativeCustomBinaryFile() ?: return false
+        return nativeBinary.exists() && nativeBinary.canRead() && nativeBinary.canExecute()
+    }
+
+    private fun resolveCustomBinaryFile(): File {
+        val nativeBinary = getNativeCustomBinaryFile()
+        if (nativeBinary != null && nativeBinary.exists() && nativeBinary.canRead() && nativeBinary.canExecute()) {
+            return nativeBinary
+        }
+        return getCustomBinaryFile()
     }
 
     private fun getCustomBinaryBuildInfoFile(): File {
@@ -178,6 +198,10 @@ object FrpcCompat {
 
     fun ensureCustomBinaryInstalled(): Boolean {
         synchronized(installLock) {
+            if (hasNativeCustomBinary()) {
+                customBackendUsable = null
+                return true
+            }
             val customBinary = getCustomBinaryFile()
             val abi = getCurrentAbi()
             val rawAssetPath = "$CUSTOM_ASSET_DIR/$abi/$CUSTOM_BINARY_NAME"
@@ -313,8 +337,8 @@ object FrpcCompat {
     }
 
     private fun hasCustomBackend(): Boolean {
-        val binary = getCustomBinaryFile()
-        val installed = (binary.exists() && binary.canExecute()) || ensureCustomBinaryInstalled()
+        val binary = resolveCustomBinaryFile()
+        val installed = hasNativeCustomBinary() || (binary.exists() && binary.canExecute()) || ensureCustomBinaryInstalled()
         if (!installed) return false
 
         customBackendUsable?.let { return it }
@@ -530,9 +554,21 @@ object FrpcCompat {
             return error
         }
 
-        val customBinary = getCustomBinaryFile()
-        if (!customBinary.exists() || !customBinary.canExecute()) {
+        var customBinary = resolveCustomBinaryFile()
+        if (!customBinary.exists()) {
+            ensureCustomBinaryInstalled()
+            customBinary = resolveCustomBinaryFile()
+        }
+        if (!customBinary.exists()) {
             val error = withBackendInfo("frpc binary not found", useCustomBackend = true)
+            setLastError(uid, error)
+            return error
+        }
+        if (!customBinary.canExecute()) {
+            customBinary.setExecutable(true, false)
+        }
+        if (!customBinary.canExecute()) {
+            val error = withBackendInfo("frpc binary is not executable: ${customBinary.absolutePath}", useCustomBackend = true)
             setLastError(uid, error)
             return error
         }
@@ -597,12 +633,15 @@ object FrpcCompat {
             Log.e(TAG, "runFile error: ${e.message}")
             val message = e.message ?: "runFile error"
             return if (isBackendStartError(message)) {
-                markCustomBackendUnavailable(message)
                 if (customOnlyMode()) {
-                    val detail = withBackendInfo("custom frpc start failed: $message", useCustomBackend = false)
+                    // with_frpc 模式不再把 backend 直接标记为 unavailable，
+                    // 否则一次权限/环境错误后会导致后续重试都短路失败。
+                    customBackendUsable = null
+                    val detail = withBackendInfo("custom frpc start failed: $message", useCustomBackend = true)
                     setLastError(uid, detail)
                     detail
                 } else {
+                    markCustomBackendUnavailable(message)
                     val fallbackError = runFileByJni(uid, configPath)
                     if (fallbackError.isNotEmpty()) {
                         val detail = withBackendInfo(fallbackError, useCustomBackend = false)
