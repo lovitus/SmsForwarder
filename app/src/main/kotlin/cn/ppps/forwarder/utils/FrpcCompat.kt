@@ -223,7 +223,7 @@ object FrpcCompat {
     }
 
     fun ensureCustomBinaryInstalled(): Boolean {
-        synchronized(installLock) {
+        return synchronized(installLock) {
             if (hasNativeCustomBinary()) {
                 customBackendUsable = null
                 return true
