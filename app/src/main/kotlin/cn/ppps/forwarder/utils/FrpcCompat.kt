@@ -22,6 +22,9 @@ object FrpcCompat {
     private const val CUSTOM_BINARY_BUILD_INFO_NAME = "frpc.buildinfo"
     private const val CUSTOM_ASSET_DIR = "frpc"
     private const val CONFIG_DIR = "frpc"
+    private const val STARTUP_READY_TIMEOUT_MS = 8_000L
+    private const val STARTUP_POLL_WAIT_MS = 300L
+    private const val STARTUP_TAIL_LINES = 12
     private val processMap = ConcurrentHashMap<String, Process>()
     private val lastErrorMap = ConcurrentHashMap<String, String>()
     private val installLock = Any()
@@ -409,6 +412,34 @@ object FrpcCompat {
             || lower.contains("no such file or directory")
     }
 
+    private fun isStartupSuccessLog(line: String): Boolean {
+        val lower = line.lowercase()
+        return lower.contains("login to server success")
+            || lower.contains("start proxy success")
+    }
+
+    private fun isStartupFailureLog(line: String): Boolean {
+        val lower = line.lowercase()
+        return lower.contains("login to server failed")
+            || lower.contains("start error")
+            || lower.contains("panic")
+            || lower.contains("fatal")
+            || lower.contains("permission denied")
+            || lower.contains("connection refused")
+            || lower.contains("i/o timeout")
+            || lower.contains("no such host")
+            || lower.contains("auth failed")
+            || lower.contains("tls handshake")
+            || lower.contains("token")
+    }
+
+    private fun waitForProcessExit(process: Process, timeoutMs: Long) {
+        try {
+            process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+        } catch (_: Exception) {
+        }
+    }
+
     private fun getVersionByJni(): String {
         return try {
             Frpclib.getVersion()
@@ -622,40 +653,33 @@ object FrpcCompat {
                     .redirectErrorStream(true)
                     .start()
 
-                val exitedQuickly = process.waitFor(500, TimeUnit.MILLISECONDS)
-                if (exitedQuickly) {
-                    val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
-                    val errorMessage = if (output.isEmpty()) {
-                        "custom frpc exited early, code=${process.exitValue()}"
-                    } else {
-                        output
-                    }
-                    val detail = withBackendInfo(errorMessage, useCustomBackend = true)
-                    setLastError(uid, detail)
-                    return detail
-                }
-
-                processMap[uid] = process
-
+                val logLock = Object()
+                val logs = mutableListOf<String>()
                 Thread {
-                    val logs = mutableListOf<String>()
                     try {
                         process.inputStream.bufferedReader().useLines { lines ->
                             lines.forEach { line ->
-                                logs.add(line)
+                                synchronized(logLock) {
+                                    logs.add(line)
+                                    logLock.notifyAll()
+                                }
                                 Log.d(TAG, "[$uid] $line")
                             }
                         }
                     } catch (e: Exception) {
                         Log.e(TAG, "read process logs error: ${e.message}")
                     } finally {
+                        synchronized(logLock) {
+                            logLock.notifyAll()
+                        }
                         val exitCode = try {
                             process.exitValue()
                         } catch (_: IllegalThreadStateException) {
                             Int.MIN_VALUE
                         }
-                        if (exitCode != Int.MIN_VALUE && exitCode != 0 && getLastError(uid).isEmpty()) {
-                            val tailLog = logs.takeLast(8).joinToString("\n").trim()
+                        val isActiveProcess = processMap[uid] === process
+                        if (exitCode != Int.MIN_VALUE && exitCode != 0 && isActiveProcess && getLastError(uid).isEmpty()) {
+                            val tailLog = synchronized(logLock) { logs.takeLast(STARTUP_TAIL_LINES).joinToString("\n").trim() }
                             val error = if (tailLog.isEmpty()) {
                                 "frpc exited with code $exitCode"
                             } else {
@@ -663,11 +687,71 @@ object FrpcCompat {
                             }
                             setLastError(uid, withBackendInfo(error, useCustomBackend = true))
                         }
-                        processMap.remove(uid)
+                        if (isActiveProcess) {
+                            processMap.remove(uid)
+                        }
                     }
                 }.start()
 
-                return ""
+                var checkedLogIndex = 0
+                var startupReady = false
+                var startupFailure: String? = null
+                val deadline = System.currentTimeMillis() + STARTUP_READY_TIMEOUT_MS
+
+                while (System.currentTimeMillis() < deadline) {
+                    synchronized(logLock) {
+                        while (checkedLogIndex < logs.size) {
+                            val line = logs[checkedLogIndex]
+                            checkedLogIndex++
+                            if (isStartupFailureLog(line)) {
+                                startupFailure = line
+                                break
+                            }
+                            if (isStartupSuccessLog(line)) {
+                                startupReady = true
+                                break
+                            }
+                        }
+                        if (!startupReady && startupFailure == null && isProcessAlive(process)) {
+                            val remain = deadline - System.currentTimeMillis()
+                            if (remain > 0) {
+                                val waitMs = if (remain < STARTUP_POLL_WAIT_MS) remain else STARTUP_POLL_WAIT_MS
+                                logLock.wait(waitMs)
+                            }
+                        }
+                    }
+                    if (startupReady || startupFailure != null) break
+                    if (!isProcessAlive(process)) break
+                }
+
+                if (startupReady) {
+                    processMap[uid] = process
+                    return ""
+                }
+
+                val tailLog = synchronized(logLock) { logs.takeLast(STARTUP_TAIL_LINES).joinToString("\n").trim() }
+                val wasAliveBeforeDestroy = isProcessAlive(process)
+                process.destroy()
+                waitForProcessExit(process, 500)
+
+                val failReason = when {
+                    startupFailure != null -> startupFailure!!
+                    !wasAliveBeforeDestroy -> {
+                        if (tailLog.isNotEmpty()) {
+                            "frpc exited during startup: $tailLog"
+                        } else {
+                            "frpc exited during startup"
+                        }
+                    }
+                    tailLog.isNotEmpty() -> {
+                        "no startup success signal within ${STARTUP_READY_TIMEOUT_MS}ms, tail=$tailLog"
+                    }
+                    else -> {
+                        "no startup success signal within ${STARTUP_READY_TIMEOUT_MS}ms"
+                    }
+                }
+                launchErrors.add("${customBinary.absolutePath}: $failReason")
+                continue
             } catch (e: Exception) {
                 Log.e(TAG, "runFile error: ${e.message}, binary=${customBinary.absolutePath}")
                 val message = e.message ?: "runFile error"
