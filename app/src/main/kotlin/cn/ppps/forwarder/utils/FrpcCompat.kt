@@ -48,12 +48,17 @@ object FrpcCompat {
         }
     }
 
+    private fun getWritableCustomBinaryFiles(): List<File> {
+        val files = linkedSetOf<File>()
+        files.add(File(File(App.context.filesDir, CUSTOM_BINARY_DIR), CUSTOM_BINARY_NAME))
+        files.add(File(File(App.context.codeCacheDir, CUSTOM_BINARY_DIR), CUSTOM_BINARY_NAME))
+        files.add(File(File(App.context.noBackupFilesDir, CUSTOM_BINARY_DIR), CUSTOM_BINARY_NAME))
+        files.add(File(File(App.context.cacheDir, CUSTOM_BINARY_DIR), CUSTOM_BINARY_NAME))
+        return files.toList()
+    }
+
     private fun getCustomBinaryFile(): File {
-        val dir = File(App.context.filesDir, CUSTOM_BINARY_DIR)
-        if (!dir.exists()) {
-            dir.mkdirs()
-        }
-        return File(dir, CUSTOM_BINARY_NAME)
+        return getWritableCustomBinaryFiles().first()
     }
 
     private fun getNativeCustomBinaryFile(): File? {
@@ -72,7 +77,28 @@ object FrpcCompat {
         if (nativeBinary != null && nativeBinary.exists() && nativeBinary.canRead() && nativeBinary.canExecute()) {
             return nativeBinary
         }
+        for (candidate in getWritableCustomBinaryFiles()) {
+            if (candidate.exists()) return candidate
+        }
         return getCustomBinaryFile()
+    }
+
+    private fun resolveCustomBinaryCandidates(): List<File> {
+        val ordered = linkedMapOf<String, File>()
+        val nativeBinary = getNativeCustomBinaryFile()
+        if (nativeBinary != null && nativeBinary.exists() && nativeBinary.canRead() && nativeBinary.canExecute()) {
+            ordered[nativeBinary.absolutePath] = nativeBinary
+        }
+        for (candidate in getWritableCustomBinaryFiles()) {
+            if (candidate.exists()) {
+                ordered[candidate.absolutePath] = candidate
+            }
+        }
+        if (ordered.isEmpty()) {
+            val fallback = getCustomBinaryFile()
+            ordered[fallback.absolutePath] = fallback
+        }
+        return ordered.values.toList()
     }
 
     private fun getCustomBinaryBuildInfoFile(): File {
@@ -202,7 +228,7 @@ object FrpcCompat {
                 customBackendUsable = null
                 return true
             }
-            val customBinary = getCustomBinaryFile()
+            val writableBinaries = getWritableCustomBinaryFiles()
             val abi = getCurrentAbi()
             val rawAssetPath = "$CUSTOM_ASSET_DIR/$abi/$CUSTOM_BINARY_NAME"
             val packedAssetPath = "$CUSTOM_ASSET_DIR/$abi/$CUSTOM_BINARY_PACKED_NAME"
@@ -218,43 +244,60 @@ object FrpcCompat {
             val hasBundledAsset = assetPath.isNotEmpty()
 
             if (!hasBundledAsset) {
-                if (customBinary.exists()) customBinary.delete()
+                writableBinaries.forEach { binary ->
+                    if (binary.exists()) binary.delete()
+                }
                 if (buildInfoFile.exists()) buildInfoFile.delete()
                 customBackendUsable = false
                 Log.d(TAG, "custom frpc asset not found for abi=$abi")
                 return false
             }
 
-            if (customBinary.exists() && customBinary.canExecute()) {
-                val installedBuildInfo = getInstalledBuildInfoText()
-                if (installedBuildInfo.isNotEmpty() && bundledBuildInfo.isNotEmpty() && installedBuildInfo == bundledBuildInfo) {
-                    customBinary.setExecutable(true, false)
-                    return customBinary.canExecute()
+            val installedBuildInfo = getInstalledBuildInfoText()
+            if (installedBuildInfo.isNotEmpty() && bundledBuildInfo.isNotEmpty() && installedBuildInfo == bundledBuildInfo) {
+                for (binary in writableBinaries) {
+                    if (!binary.exists()) continue
+                    binary.setExecutable(true, false)
+                    if (binary.canExecute()) {
+                        return true
+                    }
                 }
             }
 
-            return try {
-                val tempBinary = File(customBinary.parentFile, "${CUSTOM_BINARY_NAME}.tmp")
-                copyAssetBinary(assetPath, tempBinary)
-                if (customBinary.exists()) customBinary.delete()
-                if (!tempBinary.renameTo(customBinary)) {
-                    tempBinary.copyTo(customBinary, overwrite = true)
-                    tempBinary.delete()
+            val installErrors = mutableListOf<String>()
+            for (binary in writableBinaries) {
+                try {
+                    val parent = binary.parentFile
+                    if (parent != null && !parent.exists()) {
+                        parent.mkdirs()
+                    }
+                    val tempBinary = File(parent, "${CUSTOM_BINARY_NAME}.${System.nanoTime()}.tmp")
+                    copyAssetBinary(assetPath, tempBinary)
+                    if (binary.exists()) binary.delete()
+                    if (!tempBinary.renameTo(binary)) {
+                        tempBinary.copyTo(binary, overwrite = true)
+                        tempBinary.delete()
+                    }
+                    binary.setReadable(true, false)
+                    binary.setWritable(true, true)
+                    binary.setExecutable(true, false)
+                    if (!binary.canExecute()) {
+                        installErrors.add("${binary.absolutePath}: not executable after install")
+                        continue
+                    }
+                    if (bundledBuildInfo.isNotEmpty()) {
+                        buildInfoFile.writeText(bundledBuildInfo)
+                    } else if (buildInfoFile.exists()) {
+                        buildInfoFile.delete()
+                    }
+                    customBackendUsable = null
+                    return true
+                } catch (e: Exception) {
+                    installErrors.add("${binary.absolutePath}: ${e.message}")
                 }
-                customBinary.setReadable(true, false)
-                customBinary.setWritable(true, true)
-                customBinary.setExecutable(true, false)
-                if (bundledBuildInfo.isNotEmpty()) {
-                    buildInfoFile.writeText(bundledBuildInfo)
-                } else if (buildInfoFile.exists()) {
-                    buildInfoFile.delete()
-                }
-                customBackendUsable = null
-                customBinary.canExecute()
-            } catch (e: Exception) {
-                Log.e(TAG, "install custom frpc failed for abi=$abi: ${e.message}")
-                false
             }
+            Log.e(TAG, "install custom frpc failed for abi=$abi: ${installErrors.joinToString(" | ")}")
+            false
         }
     }
 
@@ -338,7 +381,8 @@ object FrpcCompat {
 
     private fun hasCustomBackend(): Boolean {
         val binary = resolveCustomBinaryFile()
-        val installed = hasNativeCustomBinary() || (binary.exists() && binary.canExecute()) || ensureCustomBinaryInstalled()
+        val hasWritableBinary = getWritableCustomBinaryFiles().any { it.exists() && it.canExecute() }
+        val installed = hasNativeCustomBinary() || hasWritableBinary || (binary.exists() && binary.canExecute()) || ensureCustomBinaryInstalled()
         if (!installed) return false
 
         customBackendUsable?.let { return it }
@@ -554,108 +598,108 @@ object FrpcCompat {
             return error
         }
 
-        var customBinary = resolveCustomBinaryFile()
-        if (!customBinary.exists()) {
-            ensureCustomBinaryInstalled()
-            customBinary = resolveCustomBinaryFile()
-        }
-        if (!customBinary.exists()) {
-            val error = withBackendInfo("frpc binary not found", useCustomBackend = true)
-            setLastError(uid, error)
-            return error
-        }
-        if (!customBinary.canExecute()) {
-            customBinary.setExecutable(true, false)
-        }
-        if (!customBinary.canExecute()) {
-            val error = withBackendInfo("frpc binary is not executable: ${customBinary.absolutePath}", useCustomBackend = true)
-            setLastError(uid, error)
-            return error
-        }
+        ensureCustomBinaryInstalled()
+        val candidates = resolveCustomBinaryCandidates()
+        val launchErrors = mutableListOf<String>()
 
-        return try {
-            val process = ProcessBuilder(
-                customBinary.absolutePath,
-                "-c",
-                configFile.absolutePath
-            )
-                .directory(App.context.filesDir)
-                .redirectErrorStream(true)
-                .start()
+        for (customBinary in candidates) {
+            if (!customBinary.exists()) continue
+            if (!customBinary.canExecute()) {
+                customBinary.setExecutable(true, false)
+            }
+            if (!customBinary.canExecute()) {
+                launchErrors.add("${customBinary.absolutePath}: not executable")
+                continue
+            }
 
-            val exitedQuickly = process.waitFor(500, TimeUnit.MILLISECONDS)
-            if (exitedQuickly) {
-                val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
-                val errorMessage = if (output.isEmpty()) {
-                    "custom frpc exited early, code=${process.exitValue()}"
-                } else {
-                    output
+            try {
+                val process = ProcessBuilder(
+                    customBinary.absolutePath,
+                    "-c",
+                    configFile.absolutePath
+                )
+                    .directory(App.context.filesDir)
+                    .redirectErrorStream(true)
+                    .start()
+
+                val exitedQuickly = process.waitFor(500, TimeUnit.MILLISECONDS)
+                if (exitedQuickly) {
+                    val output = process.inputStream.bufferedReader().use { it.readText() }.trim()
+                    val errorMessage = if (output.isEmpty()) {
+                        "custom frpc exited early, code=${process.exitValue()}"
+                    } else {
+                        output
+                    }
+                    val detail = withBackendInfo(errorMessage, useCustomBackend = true)
+                    setLastError(uid, detail)
+                    return detail
                 }
-                val detail = withBackendInfo(errorMessage, useCustomBackend = true)
+
+                processMap[uid] = process
+
+                Thread {
+                    val logs = mutableListOf<String>()
+                    try {
+                        process.inputStream.bufferedReader().useLines { lines ->
+                            lines.forEach { line ->
+                                logs.add(line)
+                                Log.d(TAG, "[$uid] $line")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "read process logs error: ${e.message}")
+                    } finally {
+                        val exitCode = try {
+                            process.exitValue()
+                        } catch (_: IllegalThreadStateException) {
+                            Int.MIN_VALUE
+                        }
+                        if (exitCode != Int.MIN_VALUE && exitCode != 0 && getLastError(uid).isEmpty()) {
+                            val tailLog = logs.takeLast(8).joinToString("\n").trim()
+                            val error = if (tailLog.isEmpty()) {
+                                "frpc exited with code $exitCode"
+                            } else {
+                                "frpc exited with code $exitCode\n$tailLog"
+                            }
+                            setLastError(uid, withBackendInfo(error, useCustomBackend = true))
+                        }
+                        processMap.remove(uid)
+                    }
+                }.start()
+
+                return ""
+            } catch (e: Exception) {
+                Log.e(TAG, "runFile error: ${e.message}, binary=${customBinary.absolutePath}")
+                val message = e.message ?: "runFile error"
+                if (isBackendStartError(message)) {
+                    launchErrors.add("${customBinary.absolutePath}: $message")
+                    continue
+                }
+                val detail = withBackendInfo(message, useCustomBackend = true)
                 setLastError(uid, detail)
                 return detail
             }
-
-            processMap[uid] = process
-
-            Thread {
-                val logs = mutableListOf<String>()
-                try {
-                    process.inputStream.bufferedReader().useLines { lines ->
-                        lines.forEach { line ->
-                            logs.add(line)
-                            Log.d(TAG, "[$uid] $line")
-                        }
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "read process logs error: ${e.message}")
-                } finally {
-                    val exitCode = try {
-                        process.exitValue()
-                    } catch (_: IllegalThreadStateException) {
-                        Int.MIN_VALUE
-                    }
-                    if (exitCode != Int.MIN_VALUE && exitCode != 0 && getLastError(uid).isEmpty()) {
-                        val tailLog = logs.takeLast(8).joinToString("\n").trim()
-                        val error = if (tailLog.isEmpty()) {
-                            "frpc exited with code $exitCode"
-                        } else {
-                            "frpc exited with code $exitCode\n$tailLog"
-                        }
-                        setLastError(uid, withBackendInfo(error, useCustomBackend = true))
-                    }
-                    processMap.remove(uid)
-                }
-            }.start()
-
-            ""
-        } catch (e: Exception) {
-            Log.e(TAG, "runFile error: ${e.message}")
-            val message = e.message ?: "runFile error"
-            return if (isBackendStartError(message)) {
-                if (customOnlyMode()) {
-                    // with_frpc 模式不再把 backend 直接标记为 unavailable，
-                    // 否则一次权限/环境错误后会导致后续重试都短路失败。
-                    customBackendUsable = null
-                    val detail = withBackendInfo("custom frpc start failed: $message", useCustomBackend = true)
-                    setLastError(uid, detail)
-                    detail
-                } else {
-                    markCustomBackendUnavailable(message)
-                    val fallbackError = runFileByJni(uid, configPath)
-                    if (fallbackError.isNotEmpty()) {
-                        val detail = withBackendInfo(fallbackError, useCustomBackend = false)
-                        setLastError(uid, detail)
-                        detail
-                    } else {
-                        ""
-                    }
-                }
-            } else {
-                val detail = withBackendInfo(message, useCustomBackend = true)
-                setLastError(uid, detail)
-                detail
-            }
         }
+
+        val launchSummary = if (launchErrors.isEmpty()) {
+            "frpc binary not found"
+        } else {
+            "custom frpc start failed on all candidates: ${launchErrors.joinToString(" ; ")}"
+        }
+        if (customOnlyMode()) {
+            customBackendUsable = null
+            val detail = withBackendInfo(launchSummary, useCustomBackend = true)
+            setLastError(uid, detail)
+            return detail
+        }
+
+        markCustomBackendUnavailable(launchSummary)
+        val fallbackError = runFileByJni(uid, configPath)
+        if (fallbackError.isNotEmpty()) {
+            val detail = withBackendInfo(fallbackError, useCustomBackend = false)
+            setLastError(uid, detail)
+            return detail
+        }
+        return ""
     }
 }

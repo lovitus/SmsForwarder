@@ -77,7 +77,9 @@ jobs:
           else
             TAG_NAME="vmanual-$(date -u +%Y%m%d-%H%M%S)"
           fi
+          RELEASE_NAME_PREFIX="$(date -u +%Y%m%d%H%M)"
           echo "TAG_NAME=${TAG_NAME}" >> "${GITHUB_ENV}"
+          echo "RELEASE_NAME_PREFIX=${RELEASE_NAME_PREFIX}" >> "${GITHUB_ENV}"
           echo "Using tag: ${TAG_NAME}"
 
       - name: Build Release (No Frpc)
@@ -123,7 +125,7 @@ jobs:
           set -euo pipefail
           NOTES_FILE="${DIST_DIR}/release_notes.md"
           {
-            echo "# SmsForwarder ${TAG_NAME}"
+            echo "# ${RELEASE_NAME_PREFIX} SmsForwarder ${TAG_NAME}"
             echo
             echo "## Build Summary"
             echo "- Commit: \`${GITHUB_SHA}\`"
@@ -179,7 +181,7 @@ jobs:
         with:
           tag_name: ${{ env.TAG_NAME }}
           target_commitish: ${{ github.sha }}
-          name: SmsForwarder ${{ env.TAG_NAME }}
+          name: ${{ env.RELEASE_NAME_PREFIX }} SmsForwarder ${{ env.TAG_NAME }}
           body_path: ${{ env.DIST_DIR }}/release_notes.md
           draft: false
           prerelease: false
