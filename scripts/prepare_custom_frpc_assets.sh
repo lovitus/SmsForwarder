@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ASSET_ROOT="${ROOT_DIR}/app/src/main/assets/frpc"
 JNILIB_ROOT="${ROOT_DIR}/app/src/main/jniLibs_custom"
 FRP_REPO="${FRP_REPO:-https://github.com/lovitus/frp.git}"
-FRP_REF="${FRP_REF:-v0.68.1-mix.25}"
+FRP_REF="${FRP_REF:-v0.68.1-mix.26}"
 WORK_DIR="$(mktemp -d)"
 
 cleanup() {
@@ -32,6 +32,15 @@ mkdir -p "${JNILIB_ROOT}/armeabi-v7a" "${JNILIB_ROOT}/arm64-v8a" "${JNILIB_ROOT}
 echo "Cloning ${FRP_REPO} (${FRP_REF})"
 git clone --depth 1 --branch "${FRP_REF}" "${FRP_REPO}" "${WORK_DIR}/frp-src"
 FRP_COMMIT="$(git -C "${WORK_DIR}/frp-src" rev-parse HEAD)"
+FRP_VERSION_OVERRIDE="${FRP_VERSION_OVERRIDE:-}"
+if [[ -z "${FRP_VERSION_OVERRIDE}" && "${FRP_REF}" == v* ]]; then
+  FRP_VERSION_OVERRIDE="${FRP_REF#v}"
+fi
+
+FRP_LDFLAGS="-s -w"
+if [[ -n "${FRP_VERSION_OVERRIDE}" ]]; then
+  FRP_LDFLAGS="${FRP_LDFLAGS} -X github.com/fatedier/frp/pkg/util/version.version=${FRP_VERSION_OVERRIDE}"
+fi
 
 build_frpc() {
   local abi="$1"
@@ -44,10 +53,10 @@ build_frpc() {
     cd "${WORK_DIR}/frp-src"
     if [[ -n "${goarm}" ]]; then
       CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" GOARM="${goarm}" \
-        go build -trimpath -ldflags "-s -w" -tags "frpc,noweb" -o "${ASSET_ROOT}/${abi}/frpc" ./cmd/frpc
+        go build -trimpath -ldflags "${FRP_LDFLAGS}" -tags "frpc,noweb" -o "${ASSET_ROOT}/${abi}/frpc" ./cmd/frpc
     else
       CGO_ENABLED=0 GOOS="${goos}" GOARCH="${goarch}" \
-        go build -trimpath -ldflags "-s -w" -tags "frpc,noweb" -o "${ASSET_ROOT}/${abi}/frpc" ./cmd/frpc
+        go build -trimpath -ldflags "${FRP_LDFLAGS}" -tags "frpc,noweb" -o "${ASSET_ROOT}/${abi}/frpc" ./cmd/frpc
     fi
   )
   chmod +x "${ASSET_ROOT}/${abi}/frpc"
@@ -86,6 +95,7 @@ cat > "${ASSET_ROOT}/BUILD_INFO.txt" <<EOF
 frp_repo=${FRP_REPO}
 frp_ref=${FRP_REF}
 frp_commit=${FRP_COMMIT}
+frp_version_override=${FRP_VERSION_OVERRIDE}
 source_tree=https://github.com/lovitus/frp/tree/${FRP_REF}
 generated_at_utc=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
 EOF
