@@ -5,7 +5,7 @@ ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 ASSET_ROOT="${ROOT_DIR}/app/src/main/assets/frpc"
 JNILIB_ROOT="${ROOT_DIR}/app/src/main/jniLibs_custom"
 FRP_REPO="${FRP_REPO:-https://github.com/lovitus/frp.git}"
-FRP_REF="${FRP_REF:-codex/mix-transport-release}"
+FRP_REF="${FRP_REF:-v0.68.1-mix.25}"
 WORK_DIR="$(mktemp -d)"
 
 cleanup() {
