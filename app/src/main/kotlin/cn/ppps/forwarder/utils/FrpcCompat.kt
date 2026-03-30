@@ -730,28 +730,38 @@ object FrpcCompat {
                 }
 
                 val tailLog = synchronized(logLock) { logs.takeLast(STARTUP_TAIL_LINES).joinToString("\n").trim() }
-                val wasAliveBeforeDestroy = isProcessAlive(process)
-                process.destroy()
-                waitForProcessExit(process, 500)
+                val isAliveAfterStartupCheck = isProcessAlive(process)
 
-                val failReason = when {
-                    startupFailure != null -> startupFailure!!
-                    !wasAliveBeforeDestroy -> {
-                        if (tailLog.isNotEmpty()) {
-                            "frpc exited during startup: $tailLog"
-                        } else {
-                            "frpc exited during startup"
-                        }
-                    }
-                    tailLog.isNotEmpty() -> {
-                        "no startup success signal within ${STARTUP_READY_TIMEOUT_MS}ms, tail=$tailLog"
-                    }
-                    else -> {
-                        "no startup success signal within ${STARTUP_READY_TIMEOUT_MS}ms"
-                    }
+                // 仅在发现明确失败信号时才主动终止进程，避免“启动后静默”被误判为失败。
+                if (startupFailure != null) {
+                    process.destroy()
+                    waitForProcessExit(process, 500)
+                    launchErrors.add("${customBinary.absolutePath}: ${startupFailure!!}")
+                    continue
                 }
-                launchErrors.add("${customBinary.absolutePath}: $failReason")
-                continue
+
+                // 若进程已退出，按失败处理并携带尾日志。
+                if (!isAliveAfterStartupCheck) {
+                    val failReason = if (tailLog.isNotEmpty()) {
+                        "frpc exited during startup: $tailLog"
+                    } else {
+                        "frpc exited during startup"
+                    }
+                    launchErrors.add("${customBinary.absolutePath}: $failReason")
+                    continue
+                }
+
+                // 超时但进程仍在运行：降级判定为“已启动”，交给后续运行状态检测。
+                if (tailLog.isNotEmpty()) {
+                    Log.w(
+                        TAG,
+                        "[$uid] startup success signal not found within ${STARTUP_READY_TIMEOUT_MS}ms, keep running. tail=$tailLog"
+                    )
+                } else {
+                    Log.w(TAG, "[$uid] startup success signal not found within ${STARTUP_READY_TIMEOUT_MS}ms, keep running.")
+                }
+                processMap[uid] = process
+                return ""
             } catch (e: Exception) {
                 Log.e(TAG, "runFile error: ${e.message}, binary=${customBinary.absolutePath}")
                 val message = e.message ?: "runFile error"

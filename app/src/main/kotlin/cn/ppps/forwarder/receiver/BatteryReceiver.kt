@@ -71,9 +71,10 @@ class BatteryReceiver : BroadcastReceiver() {
                     "level_old" to levelOld,
                 )
             ).build()
+            val uniqueWorkName = "battery_level_changed_${levelOld}_${levelNew}_${statusNew}"
             WorkManager.getInstance(context).enqueueUniqueWork(
-                "battery_level_changed",
-                ExistingWorkPolicy.REPLACE,
+                uniqueWorkName,
+                ExistingWorkPolicy.KEEP,
                 request
             )
         }
@@ -91,9 +92,10 @@ class BatteryReceiver : BroadcastReceiver() {
             val request = OneTimeWorkRequestBuilder<BatteryWorker>()
                 .setInputData(inputData)
                 .build()
+            val uniqueWorkName = "battery_charge_changed_${statusOld}_${statusNew}_${pluggedOld}_${pluggedNew}"
             WorkManager.getInstance(context).enqueueUniqueWork(
-                "battery_charge_changed",
-                ExistingWorkPolicy.REPLACE,
+                uniqueWorkName,
+                ExistingWorkPolicy.KEEP,
                 request
             )
         }
