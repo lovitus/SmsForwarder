@@ -22,6 +22,7 @@ jobs:
       DIST_DIR: ${{ github.workspace }}/dist
       FRP_REPO: https://github.com/lovitus/frp.git
       FRP_REF: v0.68.1-mix.26
+      HAS_ANDROID_SIGNING: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
       HAS_KEYSTORE_TOKEN: ${{ secrets.TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
@@ -38,8 +39,26 @@ jobs:
         with:
           go-version: "1.22.x"
 
+      - name: Prepare Android Keystore from Secrets
+        if: ${{ env.HAS_ANDROID_SIGNING == 'true' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p keystore
+          printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > keystore/release.keystore
+          cat > keystore/keystore.properties <<EOF
+          storeFile=../keystore/release.keystore
+          storePassword=${ANDROID_KEYSTORE_PASSWORD}
+          keyAlias=${ANDROID_KEY_ALIAS}
+          keyPassword=${ANDROID_KEY_PASSWORD}
+          EOF
+
       - name: Checkout Android Keystore
-        if: ${{ env.HAS_KEYSTORE_TOKEN == 'true' }}
+        if: ${{ env.HAS_ANDROID_SIGNING != 'true' && env.HAS_KEYSTORE_TOKEN == 'true' }}
         uses: actions/checkout@v4
         with:
           repository: pppscn/keystore
@@ -47,7 +66,7 @@ jobs:
           path: keystore
 
       - name: Prepare Android Keystore (Fallback)
-        if: ${{ env.HAS_KEYSTORE_TOKEN != 'true' }}
+        if: ${{ env.HAS_ANDROID_SIGNING != 'true' && env.HAS_KEYSTORE_TOKEN != 'true' }}
         run: |
           set -euo pipefail
           mkdir -p keystore

@@ -18,6 +18,7 @@ jobs:
       output: "${{ github.workspace }}/build/app/outputs/apk/release"
       FRP_REPO: https://github.com/lovitus/frp.git
       FRP_REF: codex/mix-transport-release
+      HAS_ANDROID_SIGNING: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
       HAS_KEYSTORE_TOKEN: ${{ secrets.TOKEN != '' }}
     steps:
       # 检出代码
@@ -45,14 +46,31 @@ jobs:
           go-version: '1.22.x'
       # 获取打包秘钥
       - name: Checkout Android Keystore
-        if: ${{ env.HAS_KEYSTORE_TOKEN == 'true' }}
+        if: ${{ env.HAS_ANDROID_SIGNING != 'true' && env.HAS_KEYSTORE_TOKEN == 'true' }}
         uses: actions/checkout@v4
         with:
           repository: pppscn/keystore
           token: ${{ secrets.TOKEN }} # 连接仓库的token,需要单独配置
           path: keystore # 仓库的根目录名
+      - name: Prepare Android Keystore from Secrets
+        if: ${{ env.HAS_ANDROID_SIGNING == 'true' }}
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          mkdir -p keystore
+          printf '%s' "${ANDROID_KEYSTORE_BASE64}" | base64 --decode > keystore/release.keystore
+          cat > keystore/keystore.properties <<EOF
+          storeFile=../keystore/release.keystore
+          storePassword=${ANDROID_KEYSTORE_PASSWORD}
+          keyAlias=${ANDROID_KEY_ALIAS}
+          keyPassword=${ANDROID_KEY_PASSWORD}
+          EOF
       - name: Prepare Android Keystore (Fallback)
-        if: ${{ env.HAS_KEYSTORE_TOKEN != 'true' }}
+        if: ${{ env.HAS_ANDROID_SIGNING != 'true' && env.HAS_KEYSTORE_TOKEN != 'true' }}
         run: |
           set -euo pipefail
           mkdir -p keystore
