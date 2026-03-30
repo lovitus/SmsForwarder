@@ -16,6 +16,7 @@ import com.xuexiang.xutil.XUtil
 import com.xuexiang.xutil.security.CipherUtils
 import com.xuexiang.xutil.system.DeviceUtils
 import cn.ppps.forwarder.utils.FrpcCompat
+import cn.ppps.forwarder.utils.FrpcLaunchResult
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.async
@@ -64,9 +65,18 @@ class SmsCommandUtils {
                         for (frpc in frpcList) {
                             if (action == "start") {
                                 if (!FrpcCompat.isRunning(frpc.uid)) {
-                                    val error = FrpcCompat.runContent(frpc.uid, frpc.config)
-                                    if (!TextUtils.isEmpty(error)) {
-                                        Log.e(TAG, error)
+                                    when (val result = FrpcCompat.startContent(frpc.uid, frpc.config)) {
+                                        is FrpcLaunchResult.Failed -> {
+                                            Log.e(TAG, result.message)
+                                        }
+
+                                        FrpcLaunchResult.StartedReady -> {
+                                            Log.d(TAG, "frpc started: uid=${frpc.uid}")
+                                        }
+
+                                        FrpcLaunchResult.StartedPending -> {
+                                            Log.w(TAG, "frpc started but readiness is unresolved: uid=${frpc.uid}")
+                                        }
                                     }
                                 }
                             } else if (action == "stop") {

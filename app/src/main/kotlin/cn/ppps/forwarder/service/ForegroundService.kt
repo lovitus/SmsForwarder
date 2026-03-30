@@ -14,7 +14,6 @@ import android.media.AudioManager
 import android.media.MediaPlayer
 import android.os.Build
 import android.os.IBinder
-import android.text.TextUtils
 import androidx.core.app.NotificationCompat
 import androidx.lifecycle.Observer
 import androidx.work.OneTimeWorkRequestBuilder
@@ -32,6 +31,7 @@ import cn.ppps.forwarder.utils.CommonUtils
 import cn.ppps.forwarder.utils.EVENT_ALARM_ACTION
 import cn.ppps.forwarder.utils.EVENT_FRPC_RUNNING_ERROR
 import cn.ppps.forwarder.utils.EVENT_FRPC_RUNNING_SUCCESS
+import cn.ppps.forwarder.utils.EVENT_FRPC_RUNNING_UNRESOLVED
 import cn.ppps.forwarder.utils.EXTRA_UPDATE_NOTIFICATION
 import cn.ppps.forwarder.utils.FRONT_CHANNEL_ID
 import cn.ppps.forwarder.utils.FRONT_CHANNEL_NAME
@@ -47,6 +47,7 @@ import cn.ppps.forwarder.workers.LoadAppListWorker
 import com.jeremyliao.liveeventbus.LiveEventBus
 import com.xuexiang.xutil.XUtil
 import cn.ppps.forwarder.utils.FrpcCompat
+import cn.ppps.forwarder.utils.FrpcLaunchResult
 import io.reactivex.Single
 import io.reactivex.SingleObserver
 import io.reactivex.android.schedulers.AndroidSchedulers
@@ -64,6 +65,8 @@ import java.io.File
 class ForegroundService : Service() {
 
     private val TAG: String = ForegroundService::class.java.simpleName
+    private val FRPC_READY_MAX_WAIT_MS = 30_000L
+    private val FRPC_READY_POLL_MS = 500L
     private var notificationManager: NotificationManager? = null
 
     private val compositeDisposable = CompositeDisposable()
@@ -84,13 +87,26 @@ class ForegroundService : Service() {
         return "[$uid] $backend | unknown frpc error"
     }
 
+    private suspend fun waitFrpcReadySignal(uid: String): Boolean {
+        val rounds = (FRPC_READY_MAX_WAIT_MS / FRPC_READY_POLL_MS).toInt()
+        repeat(rounds) {
+            if (!FrpcCompat.isRunning(uid)) return false
+            if (FrpcCompat.hasStartupSuccessSignal(uid)) return true
+            delay(FRPC_READY_POLL_MS)
+        }
+        return FrpcCompat.isRunning(uid) && FrpcCompat.hasStartupSuccessSignal(uid)
+    }
+
+    private fun buildFrpcUnresolved(uid: String): String {
+        return "[$uid] ${FrpcCompat.getBackendSummary()} | frpc is running but startup success signal is not observed"
+    }
+
     private val frpcObserver = Observer { uid: String ->
         if (!App.FrpclibInited || FrpcCompat.isRunning(uid)) return@Observer
 
         Core.frpc.get(uid).flatMap { (uid1, _, config) ->
-            val error = FrpcCompat.runContent(uid1, config)
-            Single.just(error)
-        }.subscribeOn(Schedulers.io()).observeOn(AndroidSchedulers.mainThread()).subscribe(object : SingleObserver<String> {
+            Single.just(FrpcCompat.startContent(uid1, config))
+        }.subscribeOn(Schedulers.io()).observeOn(AndroidSchedulers.mainThread()).subscribe(object : SingleObserver<FrpcLaunchResult> {
             override fun onSubscribe(d: Disposable) {
                 compositeDisposable.add(d)
             }
@@ -101,21 +117,35 @@ class ForegroundService : Service() {
                 LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post(buildFrpcError(uid, e.message))
             }
 
-            override fun onSuccess(msg: String) {
-                if (!TextUtils.isEmpty(msg)) {
-                    Log.e(TAG, msg)
-                    LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post(buildFrpcError(uid, msg))
-                } else {
-                    GlobalScope.async(Dispatchers.IO) {
-                        repeat(3) {
-                            if (FrpcCompat.isRunning(uid)) {
+            override fun onSuccess(result: FrpcLaunchResult) {
+                when (result) {
+                    is FrpcLaunchResult.Failed -> {
+                        Log.e(TAG, result.message)
+                        LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post(buildFrpcError(uid, result.message))
+                    }
+
+                    FrpcLaunchResult.StartedReady -> {
+                        LiveEventBus.get(EVENT_FRPC_RUNNING_SUCCESS, String::class.java).post(uid)
+                    }
+
+                    FrpcLaunchResult.StartedPending -> {
+                        GlobalScope.async(Dispatchers.IO) {
+                            if (waitFrpcReadySignal(uid)) {
                                 LiveEventBus.get(EVENT_FRPC_RUNNING_SUCCESS, String::class.java).post(uid)
                                 return@async
                             }
-                            delay(500)
+
+                            val detail = when {
+                                !FrpcCompat.isRunning(uid) -> FrpcCompat.getLastError(uid).ifEmpty { "frpc exited before ready" }
+                                else -> "frpc is running but startup success signal is not observed"
+                            }
+
+                            if (FrpcCompat.isRunning(uid)) {
+                                LiveEventBus.get(EVENT_FRPC_RUNNING_UNRESOLVED, String::class.java).post(buildFrpcUnresolved(uid))
+                            } else {
+                                LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post(buildFrpcError(uid, detail))
+                            }
                         }
-                        val detail = FrpcCompat.getLastError(uid).ifEmpty { "frpc exited before ready" }
-                        LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post(buildFrpcError(uid, detail))
                     }
                 }
             }
@@ -333,10 +363,28 @@ class ForegroundService : Service() {
                     for (frpc in frpcList) {
                         Log.d(TAG, "自启动的Frpc: $frpc")
                         GlobalScope.async(Dispatchers.IO) {
-                            val error = FrpcCompat.runContent(frpc.uid, frpc.config)
-                            Log.d(TAG, "自启动的Frpc: uid=${frpc.uid}, error=$error")
-                            if (!TextUtils.isEmpty(error)) {
-                                Log.e(TAG, error)
+                            when (val result = FrpcCompat.startContent(frpc.uid, frpc.config)) {
+                                is FrpcLaunchResult.Failed -> {
+                                    Log.e(TAG, "自启动的Frpc失败: uid=${frpc.uid}, error=${result.message}")
+                                    LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post(buildFrpcError(frpc.uid, result.message))
+                                }
+
+                                FrpcLaunchResult.StartedReady -> {
+                                    Log.d(TAG, "自启动的Frpc已就绪: uid=${frpc.uid}")
+                                    LiveEventBus.get(EVENT_FRPC_RUNNING_SUCCESS, String::class.java).post(frpc.uid)
+                                }
+
+                                FrpcLaunchResult.StartedPending -> {
+                                    Log.w(TAG, "自启动的Frpc待确认: uid=${frpc.uid}")
+                                    if (waitFrpcReadySignal(frpc.uid)) {
+                                        LiveEventBus.get(EVENT_FRPC_RUNNING_SUCCESS, String::class.java).post(frpc.uid)
+                                    } else if (FrpcCompat.isRunning(frpc.uid)) {
+                                        LiveEventBus.get(EVENT_FRPC_RUNNING_UNRESOLVED, String::class.java).post(buildFrpcUnresolved(frpc.uid))
+                                    } else {
+                                        val detail = FrpcCompat.getLastError(frpc.uid).ifEmpty { "frpc exited before ready" }
+                                        LiveEventBus.get(EVENT_FRPC_RUNNING_ERROR, String::class.java).post(buildFrpcError(frpc.uid, detail))
+                                    }
+                                }
                             }
                         }
                     }

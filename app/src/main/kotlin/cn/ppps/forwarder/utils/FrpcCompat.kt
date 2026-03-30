@@ -11,6 +11,12 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.zip.GZIPInputStream
 
+sealed class FrpcLaunchResult {
+    object StartedReady : FrpcLaunchResult()
+    object StartedPending : FrpcLaunchResult()
+    data class Failed(val message: String) : FrpcLaunchResult()
+}
+
 object FrpcCompat {
 
     private const val TAG = "FrpcCompat"
@@ -25,8 +31,11 @@ object FrpcCompat {
     private const val STARTUP_READY_TIMEOUT_MS = 8_000L
     private const val STARTUP_POLL_WAIT_MS = 300L
     private const val STARTUP_TAIL_LINES = 12
+    private const val PROBE_TIMEOUT_SEC = 3L
+    private const val PROBE_OUTPUT_MAX_CHARS = 4096
     private val processMap = ConcurrentHashMap<String, Process>()
     private val lastErrorMap = ConcurrentHashMap<String, String>()
+    private val startupSignalMap = ConcurrentHashMap<String, Boolean>()
     private val installLock = Any()
     @Volatile
     private var customBackendUsable: Boolean? = null
@@ -221,6 +230,7 @@ object FrpcCompat {
             val entry = iterator.next()
             if (!isProcessAlive(entry.value)) {
                 iterator.remove()
+                startupSignalMap.remove(entry.key)
             }
         }
     }
@@ -351,9 +361,23 @@ object FrpcCompat {
         lastErrorMap.remove(uid)
     }
 
+    private fun markStartupSignal(uid: String, signaled: Boolean) {
+        if (uid.isEmpty()) return
+        if (signaled) {
+            startupSignalMap[uid] = true
+        } else {
+            startupSignalMap.remove(uid)
+        }
+    }
+
     fun getLastError(uid: String): String {
         if (uid.isEmpty()) return ""
         return lastErrorMap[uid] ?: ""
+    }
+
+    fun hasStartupSuccessSignal(uid: String): Boolean {
+        if (uid.isEmpty()) return false
+        return startupSignalMap[uid] == true
     }
 
     private fun probeCustomBackend(customBinary: File): Boolean {
@@ -362,14 +386,36 @@ object FrpcCompat {
                 .directory(App.context.filesDir)
                 .redirectErrorStream(true)
                 .start()
-            val output = process.inputStream.bufferedReader().use { it.readText() }
-            val finished = process.waitFor(3, TimeUnit.SECONDS)
+            val outputBuffer = StringBuilder()
+            val readerThread = Thread {
+                try {
+                    process.inputStream.bufferedReader().useLines { lines ->
+                        lines.forEach { line ->
+                            synchronized(outputBuffer) {
+                                if (outputBuffer.length >= PROBE_OUTPUT_MAX_CHARS) return@forEach
+                                if (outputBuffer.isNotEmpty()) outputBuffer.append('\n')
+                                outputBuffer.append(line)
+                                if (outputBuffer.length > PROBE_OUTPUT_MAX_CHARS) {
+                                    outputBuffer.setLength(PROBE_OUTPUT_MAX_CHARS)
+                                }
+                            }
+                        }
+                    }
+                } catch (_: Exception) {
+                }
+            }
+            readerThread.isDaemon = true
+            readerThread.start()
+
+            val finished = process.waitFor(PROBE_TIMEOUT_SEC, TimeUnit.SECONDS)
             if (!finished) {
                 process.destroy()
+                waitForProcessExit(process, 300)
                 Log.e(TAG, "custom backend probe timeout")
                 false
             } else {
                 val exitCode = process.exitValue()
+                val output = synchronized(outputBuffer) { outputBuffer.toString() }
                 val ok = exitCode == 0 || output.contains("frpc", ignoreCase = true)
                 if (!ok) {
                     Log.e(TAG, "custom backend probe failed: code=$exitCode, output=$output")
@@ -551,6 +597,7 @@ object FrpcCompat {
 
         return if (hasCustomBackend()) {
             clearLastError(uid)
+            markStartupSignal(uid, false)
             val process = processMap.remove(uid) ?: return false
             return try {
                 process.destroy()
@@ -566,23 +613,23 @@ object FrpcCompat {
         }
     }
 
-    fun runContent(uid: String, config: String): String {
+    fun startContent(uid: String, config: String): FrpcLaunchResult {
         if (!hasCustomBackend()) {
             if (customOnlyMode()) {
                 val detail = withBackendInfo("custom frpc backend unavailable", useCustomBackend = false)
                 setLastError(uid, detail)
-                return detail
+                return FrpcLaunchResult.Failed(detail)
             }
             val error = runContentByJni(uid, config)
             if (error.isNotEmpty()) {
                 val detail = withBackendInfo(error, useCustomBackend = false)
                 setLastError(uid, detail)
-                return detail
+                return FrpcLaunchResult.Failed(detail)
             }
             clearLastError(uid)
-            return ""
+            return FrpcLaunchResult.StartedReady
         }
-        if (uid.isEmpty()) return "frpc uid is empty"
+        if (uid.isEmpty()) return FrpcLaunchResult.Failed("frpc uid is empty")
         clearLastError(uid)
 
         val configDir = File(App.context.filesDir, CONFIG_DIR)
@@ -593,40 +640,49 @@ object FrpcCompat {
         val configFile = File(configDir, "$uid.$configExt")
         return try {
             configFile.writeText(config)
-            runFile(uid, configFile.absolutePath)
+            startFile(uid, configFile.absolutePath)
         } catch (e: Exception) {
             Log.e(TAG, "runContent error: ${e.message}")
             val error = withBackendInfo(e.message ?: "runContent error", useCustomBackend = true)
             setLastError(uid, error)
-            error
+            FrpcLaunchResult.Failed(error)
         }
     }
 
-    fun runFile(uid: String, configPath: String): String {
+    fun runContent(uid: String, config: String): String {
+        return when (val result = startContent(uid, config)) {
+            is FrpcLaunchResult.Failed -> result.message
+            FrpcLaunchResult.StartedReady -> ""
+            FrpcLaunchResult.StartedPending -> withBackendInfo("frpc started but readiness is unresolved", useCustomBackend = true)
+        }
+    }
+
+    fun startFile(uid: String, configPath: String): FrpcLaunchResult {
         if (!hasCustomBackend()) {
             if (customOnlyMode()) {
                 val detail = withBackendInfo("custom frpc backend unavailable", useCustomBackend = false)
                 setLastError(uid, detail)
-                return detail
+                return FrpcLaunchResult.Failed(detail)
             }
             val error = runFileByJni(uid, configPath)
             if (error.isNotEmpty()) {
                 val detail = withBackendInfo(error, useCustomBackend = false)
                 setLastError(uid, detail)
-                return detail
+                return FrpcLaunchResult.Failed(detail)
             }
             clearLastError(uid)
-            return ""
+            return FrpcLaunchResult.StartedReady
         }
-        if (uid.isEmpty()) return "frpc uid is empty"
-        if (isRunning(uid)) return ""
+        if (uid.isEmpty()) return FrpcLaunchResult.Failed("frpc uid is empty")
+        if (isRunning(uid)) return FrpcLaunchResult.StartedReady
         clearLastError(uid)
+        markStartupSignal(uid, false)
 
         val configFile = File(configPath)
         if (!configFile.exists()) {
             val error = withBackendInfo("config file not found: $configPath", useCustomBackend = true)
             setLastError(uid, error)
-            return error
+            return FrpcLaunchResult.Failed(error)
         }
 
         ensureCustomBinaryInstalled()
@@ -663,6 +719,9 @@ object FrpcCompat {
                                     logs.add(line)
                                     logLock.notifyAll()
                                 }
+                                if (isStartupSuccessLog(line)) {
+                                    markStartupSignal(uid, true)
+                                }
                                 Log.d(TAG, "[$uid] $line")
                             }
                         }
@@ -689,6 +748,7 @@ object FrpcCompat {
                         }
                         if (isActiveProcess) {
                             processMap.remove(uid)
+                            markStartupSignal(uid, false)
                         }
                     }
                 }.start()
@@ -709,6 +769,7 @@ object FrpcCompat {
                             }
                             if (isStartupSuccessLog(line)) {
                                 startupReady = true
+                                markStartupSignal(uid, true)
                                 break
                             }
                         }
@@ -725,14 +786,14 @@ object FrpcCompat {
                 }
 
                 if (startupReady) {
+                    markStartupSignal(uid, true)
                     processMap[uid] = process
-                    return ""
+                    return FrpcLaunchResult.StartedReady
                 }
 
                 val tailLog = synchronized(logLock) { logs.takeLast(STARTUP_TAIL_LINES).joinToString("\n").trim() }
                 val isAliveAfterStartupCheck = isProcessAlive(process)
 
-                // 仅在发现明确失败信号时才主动终止进程，避免“启动后静默”被误判为失败。
                 if (startupFailure != null) {
                     process.destroy()
                     waitForProcessExit(process, 500)
@@ -740,7 +801,6 @@ object FrpcCompat {
                     continue
                 }
 
-                // 若进程已退出，按失败处理并携带尾日志。
                 if (!isAliveAfterStartupCheck) {
                     val failReason = if (tailLog.isNotEmpty()) {
                         "frpc exited during startup: $tailLog"
@@ -751,17 +811,13 @@ object FrpcCompat {
                     continue
                 }
 
-                // 超时但进程仍在运行：降级判定为“已启动”，交给后续运行状态检测。
                 if (tailLog.isNotEmpty()) {
-                    Log.w(
-                        TAG,
-                        "[$uid] startup success signal not found within ${STARTUP_READY_TIMEOUT_MS}ms, keep running. tail=$tailLog"
-                    )
+                    Log.w(TAG, "[$uid] startup success signal not found within ${STARTUP_READY_TIMEOUT_MS}ms, keep running. tail=$tailLog")
                 } else {
                     Log.w(TAG, "[$uid] startup success signal not found within ${STARTUP_READY_TIMEOUT_MS}ms, keep running.")
                 }
                 processMap[uid] = process
-                return ""
+                return FrpcLaunchResult.StartedPending
             } catch (e: Exception) {
                 Log.e(TAG, "runFile error: ${e.message}, binary=${customBinary.absolutePath}")
                 val message = e.message ?: "runFile error"
@@ -771,7 +827,7 @@ object FrpcCompat {
                 }
                 val detail = withBackendInfo(message, useCustomBackend = true)
                 setLastError(uid, detail)
-                return detail
+                return FrpcLaunchResult.Failed(detail)
             }
         }
 
@@ -784,7 +840,7 @@ object FrpcCompat {
             customBackendUsable = null
             val detail = withBackendInfo(launchSummary, useCustomBackend = true)
             setLastError(uid, detail)
-            return detail
+            return FrpcLaunchResult.Failed(detail)
         }
 
         markCustomBackendUnavailable(launchSummary)
@@ -792,8 +848,17 @@ object FrpcCompat {
         if (fallbackError.isNotEmpty()) {
             val detail = withBackendInfo(fallbackError, useCustomBackend = false)
             setLastError(uid, detail)
-            return detail
+            return FrpcLaunchResult.Failed(detail)
         }
-        return ""
+        clearLastError(uid)
+        return FrpcLaunchResult.StartedReady
+    }
+
+    fun runFile(uid: String, configPath: String): String {
+        return when (val result = startFile(uid, configPath)) {
+            is FrpcLaunchResult.Failed -> result.message
+            FrpcLaunchResult.StartedReady -> ""
+            FrpcLaunchResult.StartedPending -> withBackendInfo("frpc started but readiness is unresolved", useCustomBackend = true)
+        }
     }
 }

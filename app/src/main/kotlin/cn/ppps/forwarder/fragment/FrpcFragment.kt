@@ -23,6 +23,7 @@ import cn.ppps.forwarder.utils.ACTION_START
 import cn.ppps.forwarder.utils.EVENT_FRPC_DELETE_CONFIG
 import cn.ppps.forwarder.utils.EVENT_FRPC_RUNNING_ERROR
 import cn.ppps.forwarder.utils.EVENT_FRPC_RUNNING_SUCCESS
+import cn.ppps.forwarder.utils.EVENT_FRPC_RUNNING_UNRESOLVED
 import cn.ppps.forwarder.utils.EVENT_FRPC_UPDATE_CONFIG
 import cn.ppps.forwarder.utils.FRPC_LIB_VERSION
 import cn.ppps.forwarder.utils.FrpcUtils
@@ -141,6 +142,15 @@ class FrpcFragment : BaseFragment<FragmentFrpcsBinding?>(), FrpcPagingAdapter.On
 
         //运行成功
         LiveEventBus.get(EVENT_FRPC_RUNNING_SUCCESS, String::class.java).observe(this) {
+            adapter.refresh()
+        }
+
+        //运行状态未确认
+        LiveEventBus.get(EVENT_FRPC_RUNNING_UNRESOLVED, String::class.java).observe(this) {
+            val detail = it?.trim().orEmpty()
+            if (detail.isNotEmpty()) {
+                XToastUtils.info(detail)
+            }
             adapter.refresh()
         }
     }

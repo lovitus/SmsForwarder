@@ -70,6 +70,7 @@ import com.xuexiang.xutil.XUtil
 import com.xuexiang.xutil.data.ConvertTools
 import com.xuexiang.xutil.resource.ResUtils.getString
 import cn.ppps.forwarder.utils.FrpcCompat
+import cn.ppps.forwarder.utils.FrpcLaunchResult
 import java.util.Calendar
 
 //执行每个task具体动作任务
@@ -253,9 +254,21 @@ class ActionWorker(context: Context, params: WorkerParameters) : CoroutineWorker
                         for (frpc in frpcList) {
                             if (frpcSetting.action == "start") {
                                 if (!FrpcCompat.isRunning(frpc.uid)) {
-                                    val error = FrpcCompat.runContent(frpc.uid, frpc.config)
-                                    if (!TextUtils.isEmpty(error)) {
-                                        Log.e(TAG, error)
+                                    when (val result = FrpcCompat.startContent(frpc.uid, frpc.config)) {
+                                        is FrpcLaunchResult.Failed -> {
+                                            Log.e(TAG, result.message)
+                                            writeLog(result.message, "ERROR")
+                                        }
+
+                                        FrpcLaunchResult.StartedReady -> {
+                                            Log.d(TAG, "frpc started: uid=${frpc.uid}")
+                                        }
+
+                                        FrpcLaunchResult.StartedPending -> {
+                                            val detail = "frpc started but readiness is unresolved: uid=${frpc.uid}"
+                                            Log.w(TAG, detail)
+                                            writeLog(detail, "WARNING")
+                                        }
                                     }
                                 }
                             } else if (frpcSetting.action == "stop") {
