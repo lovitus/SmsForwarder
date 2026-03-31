@@ -15,8 +15,53 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  resolve:
     runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.meta.outputs.tag_name }}
+      release_name_prefix: ${{ steps.meta.outputs.release_name_prefix }}
+    steps:
+      - name: Resolve Release Tag
+        id: meta
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            TAG_NAME="${GITHUB_REF_NAME}"
+          elif [[ -n "${{ github.event.inputs.release_tag }}" ]]; then
+            TAG_NAME="${{ github.event.inputs.release_tag }}"
+          else
+            TAG_NAME="vmanual-$(date -u +%Y%m%d-%H%M%S)"
+          fi
+          RELEASE_NAME_PREFIX="$(date -u +%Y%m%d%H%M)"
+          echo "tag_name=${TAG_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "release_name_prefix=${RELEASE_NAME_PREFIX}" >> "${GITHUB_OUTPUT}"
+          echo "Using tag: ${TAG_NAME}"
+
+  build:
+    needs: resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - kind: no_frpc
+            display_name: "Build Release (No Frpc)"
+            with_frpc_package: "false"
+            with_frpc_exec_fallback: "false"
+            artifact_glob: "SmsF_*_release.apk"
+            artifact_subdir: "no_frpc"
+          - kind: with_frpc
+            display_name: "Build Release (With Custom Frpc)"
+            with_frpc_package: "true"
+            with_frpc_exec_fallback: "false"
+            artifact_glob: "SmsF_*_with_frpc.apk"
+            artifact_subdir: "with_frpc"
+          - kind: with_frpc_fallback
+            display_name: "Build Release (With Custom Frpc Fallback)"
+            with_frpc_package: "true"
+            with_frpc_exec_fallback: "true"
+            artifact_glob: "SmsF_*_with_frpc_fallback.apk"
+            artifact_subdir: "with_frpc_fallback"
     env:
       OUTPUT_DIR: ${{ github.workspace }}/build/app/outputs/apk/release
       DIST_DIR: ${{ github.workspace }}/dist
@@ -88,68 +133,72 @@ jobs:
           keyPassword=android
           EOF
 
-      - name: Resolve Release Tag
-        run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            TAG_NAME="${GITHUB_REF_NAME}"
-          elif [[ -n "${{ github.event.inputs.release_tag }}" ]]; then
-            TAG_NAME="${{ github.event.inputs.release_tag }}"
-          else
-            TAG_NAME="vmanual-$(date -u +%Y%m%d-%H%M%S)"
-          fi
-          RELEASE_NAME_PREFIX="$(date -u +%Y%m%d%H%M)"
-          echo "TAG_NAME=${TAG_NAME}" >> "${GITHUB_ENV}"
-          echo "RELEASE_NAME_PREFIX=${RELEASE_NAME_PREFIX}" >> "${GITHUB_ENV}"
-          echo "Using tag: ${TAG_NAME}"
-
-      - name: Build Release (No Frpc)
+      - name: Prepare Workspace
         run: |
           set -euo pipefail
           bash scripts/cleanup_custom_frpc_assets.sh || true
-          bash ./gradlew clean assembleRelease -PexcludeFrpclib=true -PwithFrpcPackage=false -PwithFrpcExecFallback=false
-          mkdir -p "${DIST_DIR}/no_frpc"
-          cp -v "${OUTPUT_DIR}"/SmsF_*_release.apk "${DIST_DIR}/no_frpc/" || true
+          rm -rf "${DIST_DIR}" "${OUTPUT_DIR}"
+          mkdir -p "${DIST_DIR}/${{ matrix.package.artifact_subdir }}"
 
-      - name: Build Release (With Custom Frpc)
+      - name: Prepare Custom Frpc Assets
+        if: ${{ matrix.package.with_frpc_package == 'true' }}
         env:
           FRP_REPO: ${{ env.FRP_REPO }}
           FRP_REF: ${{ env.FRP_REF }}
-          WITH_FRPC_EXEC_FALLBACK: "false"
+          WITH_FRPC_EXEC_FALLBACK: ${{ matrix.package.with_frpc_exec_fallback }}
         run: |
           set -euo pipefail
           bash scripts/prepare_custom_frpc_assets.sh
-          bash ./gradlew clean assembleRelease -PexcludeFrpclib=true -PwithFrpcPackage=true -PwithFrpcExecFallback=false
-          mkdir -p "${DIST_DIR}/with_frpc"
-          shopt -s nullglob
-          for apk in "${OUTPUT_DIR}"/SmsF_*_with_frpc.apk; do
-            if [[ "${apk}" == *"_universal_"* ]]; then
-              continue
-            fi
-            cp -v "${apk}" "${DIST_DIR}/with_frpc/"
-          done
-          cp -v "${META_DIR}/BUILD_INFO.txt" "${DIST_DIR}/BUILD_INFO_with_frpc.txt" || true
-          bash scripts/cleanup_custom_frpc_assets.sh
 
-      - name: Build Release (With Custom Frpc Fallback)
-        env:
-          FRP_REPO: ${{ env.FRP_REPO }}
-          FRP_REF: ${{ env.FRP_REF }}
-          WITH_FRPC_EXEC_FALLBACK: "true"
+      - name: ${{ matrix.package.display_name }}
         run: |
           set -euo pipefail
-          bash scripts/prepare_custom_frpc_assets.sh
-          bash ./gradlew clean assembleRelease -PexcludeFrpclib=true -PwithFrpcPackage=true -PwithFrpcExecFallback=true
-          mkdir -p "${DIST_DIR}/with_frpc_fallback"
+          bash ./gradlew --no-daemon clean assembleRelease \
+            -PexcludeFrpclib=true \
+            -PwithFrpcPackage=${{ matrix.package.with_frpc_package }} \
+            -PwithFrpcExecFallback=${{ matrix.package.with_frpc_exec_fallback }}
           shopt -s nullglob
-          for apk in "${OUTPUT_DIR}"/SmsF_*_with_frpc_fallback.apk; do
-            if [[ "${apk}" == *"_universal_"* ]]; then
+          for apk in "${OUTPUT_DIR}"/${{ matrix.package.artifact_glob }}; do
+            if [[ "${apk}" == *"_universal_"* && "${{ matrix.package.kind }}" != "no_frpc" ]]; then
               continue
             fi
-            cp -v "${apk}" "${DIST_DIR}/with_frpc_fallback/"
+            cp -v "${apk}" "${DIST_DIR}/${{ matrix.package.artifact_subdir }}/"
           done
-          cp -v "${META_DIR}/BUILD_INFO.txt" "${DIST_DIR}/BUILD_INFO_with_frpc_fallback.txt" || true
-          cp -v "${META_DIR}/SHA256SUMS.txt" "${DIST_DIR}/SHA256SUMS_with_frpc_fallback.txt" || true
-          bash scripts/cleanup_custom_frpc_assets.sh
+          if [[ -f "${META_DIR}/BUILD_INFO.txt" ]]; then
+            cp -v "${META_DIR}/BUILD_INFO.txt" "${DIST_DIR}/BUILD_INFO_${{ matrix.package.kind }}.txt"
+          fi
+          if [[ -f "${META_DIR}/SHA256SUMS.txt" ]]; then
+            cp -v "${META_DIR}/SHA256SUMS.txt" "${DIST_DIR}/SHA256SUMS_${{ matrix.package.kind }}.txt"
+          fi
+
+      - name: Verify Package Output
+        run: |
+          set -euo pipefail
+          ls -lah "${DIST_DIR}/${{ matrix.package.artifact_subdir }}"
+          test -n "$(ls -1 "${DIST_DIR}/${{ matrix.package.artifact_subdir }}"/*.apk 2>/dev/null || true)"
+
+      - name: Upload Build Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ matrix.package.kind }}
+          path: ${{ env.DIST_DIR }}
+
+  release:
+    needs:
+      - resolve
+      - build
+    runs-on: ubuntu-latest
+    env:
+      DIST_DIR: ${{ github.workspace }}/dist
+      FRP_REPO: https://github.com/lovitus/frp.git
+      FRP_REF: v0.68.1-mix.26
+    steps:
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: dist-*
+          path: ${{ env.DIST_DIR }}
+          merge-multiple: true
 
       - name: Verify Output Files
         run: |
@@ -168,6 +217,8 @@ jobs:
         run: |
           set -euo pipefail
           NOTES_FILE="${DIST_DIR}/release_notes.md"
+          RELEASE_NAME_PREFIX="${{ needs.resolve.outputs.release_name_prefix }}"
+          TAG_NAME="${{ needs.resolve.outputs.tag_name }}"
           {
             echo "# ${RELEASE_NAME_PREFIX} SmsForwarder ${TAG_NAME}"
             echo
@@ -219,35 +270,33 @@ jobs:
             echo "- Ref: \`${FRP_REF}\`"
             echo "- Build method: source build for 4 ABIs (arm64-v8a/armeabi-v7a/x86_64/x86)"
             echo "- Build flags: \`CGO_ENABLED=0 -trimpath -ldflags \"-s -w\" -tags \"frpc,noweb\"\`"
-            if [[ -f "${DIST_DIR}/BUILD_INFO_with_frpc.txt" ]]; then
+            for info_file in "${DIST_DIR}"/BUILD_INFO_*.txt; do
+              [[ -f "${info_file}" ]] || continue
               echo
-              echo "## Frpc Build Info (With Frpc)"
+              echo "## $(basename "${info_file}")"
               echo '```'
-              cat "${DIST_DIR}/BUILD_INFO_with_frpc.txt"
+              cat "${info_file}"
               echo '```'
-            fi
-            if [[ -f "${DIST_DIR}/BUILD_INFO_with_frpc_fallback.txt" ]]; then
+            done
+            for sha_file in "${DIST_DIR}"/SHA256SUMS_*.txt; do
+              [[ -f "${sha_file}" ]] || continue
+              if [[ ! -s "${sha_file}" ]]; then
+                continue
+              fi
               echo
-              echo "## Frpc Build Info (With Frpc Fallback)"
+              echo "## $(basename "${sha_file}")"
               echo '```'
-              cat "${DIST_DIR}/BUILD_INFO_with_frpc_fallback.txt"
+              cat "${sha_file}"
               echo '```'
-            fi
-            if [[ -f "${DIST_DIR}/SHA256SUMS_with_frpc_fallback.txt" ]]; then
-              echo
-              echo "## Custom Frpc SHA256 (Fallback)"
-              echo '```'
-              cat "${DIST_DIR}/SHA256SUMS_with_frpc_fallback.txt"
-              echo '```'
-            fi
+            done
           } > "${NOTES_FILE}"
 
       - name: Create/Update GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ env.TAG_NAME }}
+          tag_name: ${{ needs.resolve.outputs.tag_name }}
           target_commitish: ${{ github.sha }}
-          name: ${{ env.RELEASE_NAME_PREFIX }} SmsForwarder ${{ env.TAG_NAME }}
+          name: ${{ needs.resolve.outputs.release_name_prefix }} SmsForwarder ${{ needs.resolve.outputs.tag_name }}
           body_path: ${{ env.DIST_DIR }}/release_notes.md
           draft: false
           prerelease: false
@@ -255,6 +304,5 @@ jobs:
             ${{ env.DIST_DIR }}/no_frpc/*.apk
             ${{ env.DIST_DIR }}/with_frpc/*.apk
             ${{ env.DIST_DIR }}/with_frpc_fallback/*.apk
-            ${{ env.DIST_DIR }}/BUILD_INFO_with_frpc.txt
-            ${{ env.DIST_DIR }}/BUILD_INFO_with_frpc_fallback.txt
-            ${{ env.DIST_DIR }}/SHA256SUMS_with_frpc_fallback.txt
+            ${{ env.DIST_DIR }}/BUILD_INFO_*.txt
+            ${{ env.DIST_DIR }}/SHA256SUMS_*.txt
