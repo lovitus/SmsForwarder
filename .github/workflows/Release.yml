@@ -20,6 +20,7 @@ jobs:
     env:
       OUTPUT_DIR: ${{ github.workspace }}/build/app/outputs/apk/release
       DIST_DIR: ${{ github.workspace }}/dist
+      META_DIR: ${{ github.workspace }}/build/custom_frpc_meta
       FRP_REPO: https://github.com/lovitus/frp.git
       FRP_REF: v0.68.1-mix.26
       HAS_ANDROID_SIGNING: ${{ secrets.ANDROID_KEYSTORE_BASE64 != '' && secrets.ANDROID_KEYSTORE_PASSWORD != '' && secrets.ANDROID_KEY_ALIAS != '' && secrets.ANDROID_KEY_PASSWORD != '' }}
@@ -105,7 +106,7 @@ jobs:
         run: |
           set -euo pipefail
           bash scripts/cleanup_custom_frpc_assets.sh || true
-          bash ./gradlew clean assembleRelease -PexcludeFrpclib=true -PwithFrpcPackage=false
+          bash ./gradlew clean assembleRelease -PexcludeFrpclib=true -PwithFrpcPackage=false -PwithFrpcExecFallback=false
           mkdir -p "${DIST_DIR}/no_frpc"
           cp -v "${OUTPUT_DIR}"/SmsF_*_release.apk "${DIST_DIR}/no_frpc/" || true
 
@@ -113,10 +114,11 @@ jobs:
         env:
           FRP_REPO: ${{ env.FRP_REPO }}
           FRP_REF: ${{ env.FRP_REF }}
+          WITH_FRPC_EXEC_FALLBACK: "false"
         run: |
           set -euo pipefail
           bash scripts/prepare_custom_frpc_assets.sh
-          bash ./gradlew clean assembleRelease -PexcludeFrpclib=true -PwithFrpcPackage=true
+          bash ./gradlew clean assembleRelease -PexcludeFrpclib=true -PwithFrpcPackage=true -PwithFrpcExecFallback=false
           mkdir -p "${DIST_DIR}/with_frpc"
           shopt -s nullglob
           for apk in "${OUTPUT_DIR}"/SmsF_*_with_frpc.apk; do
@@ -125,8 +127,28 @@ jobs:
             fi
             cp -v "${apk}" "${DIST_DIR}/with_frpc/"
           done
-          cp -v app/src/main/assets/frpc/BUILD_INFO.txt "${DIST_DIR}/" || true
-          cp -v app/src/main/assets/frpc/SHA256SUMS.txt "${DIST_DIR}/" || true
+          cp -v "${META_DIR}/BUILD_INFO.txt" "${DIST_DIR}/BUILD_INFO_with_frpc.txt" || true
+          bash scripts/cleanup_custom_frpc_assets.sh
+
+      - name: Build Release (With Custom Frpc Fallback)
+        env:
+          FRP_REPO: ${{ env.FRP_REPO }}
+          FRP_REF: ${{ env.FRP_REF }}
+          WITH_FRPC_EXEC_FALLBACK: "true"
+        run: |
+          set -euo pipefail
+          bash scripts/prepare_custom_frpc_assets.sh
+          bash ./gradlew clean assembleRelease -PexcludeFrpclib=true -PwithFrpcPackage=true -PwithFrpcExecFallback=true
+          mkdir -p "${DIST_DIR}/with_frpc_fallback"
+          shopt -s nullglob
+          for apk in "${OUTPUT_DIR}"/SmsF_*_with_frpc_fallback.apk; do
+            if [[ "${apk}" == *"_universal_"* ]]; then
+              continue
+            fi
+            cp -v "${apk}" "${DIST_DIR}/with_frpc_fallback/"
+          done
+          cp -v "${META_DIR}/BUILD_INFO.txt" "${DIST_DIR}/BUILD_INFO_with_frpc_fallback.txt" || true
+          cp -v "${META_DIR}/SHA256SUMS.txt" "${DIST_DIR}/SHA256SUMS_with_frpc_fallback.txt" || true
           bash scripts/cleanup_custom_frpc_assets.sh
 
       - name: Verify Output Files
@@ -136,8 +158,11 @@ jobs:
           ls -lah "${DIST_DIR}/no_frpc"
           echo "With Frpc APKs:"
           ls -lah "${DIST_DIR}/with_frpc"
+          echo "With Frpc Fallback APKs:"
+          ls -lah "${DIST_DIR}/with_frpc_fallback"
           test -n "$(ls -1 "${DIST_DIR}/no_frpc"/*.apk 2>/dev/null || true)"
           test -n "$(ls -1 "${DIST_DIR}/with_frpc"/*.apk 2>/dev/null || true)"
+          test -n "$(ls -1 "${DIST_DIR}/with_frpc_fallback"/*.apk 2>/dev/null || true)"
 
       - name: Generate Release Notes
         run: |
@@ -153,9 +178,16 @@ jobs:
             echo
             echo "## Package Matrix"
             echo "- Standard APKs: universal + armeabi-v7a + arm64-v8a + x86 + x86_64"
-            echo "- With Frpc APKs: armeabi-v7a + arm64-v8a + x86 + x86_64 (no universal)"
+            echo "- With Frpc APKs: armeabi-v7a + arm64-v8a + x86 + x86_64 (no universal, recommended)"
+            echo "- With Frpc Fallback APKs: armeabi-v7a + arm64-v8a + x86 + x86_64 (no universal, compatibility only)"
             echo "- With Frpc runtime: custom-only backend (JNI libgojni.so excluded, prefer bundled \`libfrpc.so\`)"
-            echo "- With Frpc assets: \`assets/frpc/<abi>/frpc.bin\` (gzip payload, runtime extracted to app private dir)"
+            echo "- With Frpc package: no \`assets/frpc/**\`, no runtime exec fallback"
+            echo "- With Frpc Fallback package: keeps \`assets/frpc/<abi>/frpc.bin\` exec fallback for compatibility"
+            echo
+            echo "## Install Decision"
+            echo "1. Install \`with_frpc\` first."
+            echo "2. If logs show startup errors like \`permission denied\`, \`cannot run program\`, \`not executable\`, or the custom backend stays unavailable on a specific ROM, try \`with_frpc_fallback\`."
+            echo "3. Use standard APKs only when you want the legacy JNI backend instead of custom frpc."
             echo
             echo "## APK Assets (Standard)"
             shopt -s nullglob
@@ -174,23 +206,38 @@ jobs:
               echo "- \`${file_name}\` | ${file_size} | \`${file_sha}\`"
             done
             echo
+            echo "## APK Assets (With Frpc Fallback)"
+            for apk in "${DIST_DIR}/with_frpc_fallback"/*.apk; do
+              file_name="$(basename "${apk}")"
+              file_size="$(du -h "${apk}" | awk '{print $1}')"
+              file_sha="$(sha256sum "${apk}" | awk '{print $1}')"
+              echo "- \`${file_name}\` | ${file_size} | \`${file_sha}\`"
+            done
+            echo
             echo "## Custom Frpc Source"
             echo "- Repo: ${FRP_REPO}"
             echo "- Ref: \`${FRP_REF}\`"
             echo "- Build method: source build for 4 ABIs (arm64-v8a/armeabi-v7a/x86_64/x86)"
             echo "- Build flags: \`CGO_ENABLED=0 -trimpath -ldflags \"-s -w\" -tags \"frpc,noweb\"\`"
-            if [[ -f "${DIST_DIR}/BUILD_INFO.txt" ]]; then
+            if [[ -f "${DIST_DIR}/BUILD_INFO_with_frpc.txt" ]]; then
               echo
-              echo "## Frpc Build Info"
+              echo "## Frpc Build Info (With Frpc)"
               echo '```'
-              cat "${DIST_DIR}/BUILD_INFO.txt"
+              cat "${DIST_DIR}/BUILD_INFO_with_frpc.txt"
               echo '```'
             fi
-            if [[ -f "${DIST_DIR}/SHA256SUMS.txt" ]]; then
+            if [[ -f "${DIST_DIR}/BUILD_INFO_with_frpc_fallback.txt" ]]; then
               echo
-              echo "## Custom Frpc SHA256"
+              echo "## Frpc Build Info (With Frpc Fallback)"
               echo '```'
-              cat "${DIST_DIR}/SHA256SUMS.txt"
+              cat "${DIST_DIR}/BUILD_INFO_with_frpc_fallback.txt"
+              echo '```'
+            fi
+            if [[ -f "${DIST_DIR}/SHA256SUMS_with_frpc_fallback.txt" ]]; then
+              echo
+              echo "## Custom Frpc SHA256 (Fallback)"
+              echo '```'
+              cat "${DIST_DIR}/SHA256SUMS_with_frpc_fallback.txt"
               echo '```'
             fi
           } > "${NOTES_FILE}"
@@ -207,5 +254,7 @@ jobs:
           files: |
             ${{ env.DIST_DIR }}/no_frpc/*.apk
             ${{ env.DIST_DIR }}/with_frpc/*.apk
-            ${{ env.DIST_DIR }}/BUILD_INFO.txt
-            ${{ env.DIST_DIR }}/SHA256SUMS.txt
+            ${{ env.DIST_DIR }}/with_frpc_fallback/*.apk
+            ${{ env.DIST_DIR }}/BUILD_INFO_with_frpc.txt
+            ${{ env.DIST_DIR }}/BUILD_INFO_with_frpc_fallback.txt
+            ${{ env.DIST_DIR }}/SHA256SUMS_with_frpc_fallback.txt

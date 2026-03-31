@@ -44,6 +44,10 @@ object FrpcCompat {
         return BuildConfig.WITH_FRPC_PACKAGE
     }
 
+    private fun execFallbackEnabled(): Boolean {
+        return BuildConfig.WITH_FRPC_EXEC_FALLBACK
+    }
+
     private fun getCurrentAbi(): String {
         val abi = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             Build.SUPPORTED_ABIS.firstOrNull()
@@ -84,10 +88,17 @@ object FrpcCompat {
         return nativeBinary.exists() && nativeBinary.canRead() && nativeBinary.canExecute()
     }
 
+    private fun canUseExecFallback(): Boolean {
+        return !customOnlyMode() || execFallbackEnabled()
+    }
+
     private fun resolveCustomBinaryFile(): File {
         val nativeBinary = getNativeCustomBinaryFile()
         if (nativeBinary != null && nativeBinary.exists() && nativeBinary.canRead() && nativeBinary.canExecute()) {
             return nativeBinary
+        }
+        if (!canUseExecFallback()) {
+            return nativeBinary ?: getCustomBinaryFile()
         }
         for (candidate in getWritableCustomBinaryFiles()) {
             if (candidate.exists()) return candidate
@@ -100,6 +111,9 @@ object FrpcCompat {
         val nativeBinary = getNativeCustomBinaryFile()
         if (nativeBinary != null && nativeBinary.exists() && nativeBinary.canRead() && nativeBinary.canExecute()) {
             ordered[nativeBinary.absolutePath] = nativeBinary
+        }
+        if (!canUseExecFallback()) {
+            return ordered.values.toList()
         }
         for (candidate in getWritableCustomBinaryFiles()) {
             if (candidate.exists()) {
@@ -237,6 +251,10 @@ object FrpcCompat {
 
     fun ensureCustomBinaryInstalled(): Boolean {
         return synchronized(installLock) {
+            if (!canUseExecFallback()) {
+                Log.i(TAG, "exec fallback disabled; skip writable custom binary install")
+                return hasNativeCustomBinary()
+            }
             if (hasNativeCustomBinary()) {
                 customBackendUsable = null
                 return true
@@ -430,7 +448,7 @@ object FrpcCompat {
 
     private fun hasCustomBackend(): Boolean {
         val binary = resolveCustomBinaryFile()
-        val hasWritableBinary = getWritableCustomBinaryFiles().any { it.exists() && it.canExecute() }
+        val hasWritableBinary = canUseExecFallback() && getWritableCustomBinaryFiles().any { it.exists() && it.canExecute() }
         val installed = hasNativeCustomBinary() || hasWritableBinary || (binary.exists() && binary.canExecute()) || ensureCustomBinaryInstalled()
         if (!installed) return false
 
@@ -685,7 +703,9 @@ object FrpcCompat {
             return FrpcLaunchResult.Failed(error)
         }
 
-        ensureCustomBinaryInstalled()
+        if (canUseExecFallback()) {
+            ensureCustomBinaryInstalled()
+        }
         val candidates = resolveCustomBinaryCandidates()
         val launchErrors = mutableListOf<String>()
 
@@ -700,6 +720,9 @@ object FrpcCompat {
             }
 
             try {
+                if (customBinary.name == CUSTOM_BINARY_NAME) {
+                    Log.w(TAG, "[$uid] using exec fallback backend: ${customBinary.absolutePath}")
+                }
                 val process = ProcessBuilder(
                     customBinary.absolutePath,
                     "-c",

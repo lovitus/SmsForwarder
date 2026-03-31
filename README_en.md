@@ -76,6 +76,8 @@ See more screenshots：https://github.com/pppscn/SmsForwarder/wiki
 
 > ⚠ Custom frpc build/ops summary (Chinese): [`docs/FRPC_Custom_Build_and_Ops_ZH.md`](docs/FRPC_Custom_Build_and_Ops_ZH.md)
 
+> ⚠ Install guidance: use `with_frpc` first; switch to `with_frpc_fallback` only when logs show compatibility errors such as `permission denied`, `cannot run program`, `not executable`, or custom backend unavailable.
+
 > ⚠ Upstream merge guide for fork (Chinese): [`docs/Fork_Upstream_Merge_Guide_ZH.md`](docs/Fork_Upstream_Merge_Guide_ZH.md)
 
 --------

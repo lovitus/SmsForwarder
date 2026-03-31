@@ -92,7 +92,7 @@ jobs:
           EOF
       # 打包release
       - name: Build with Gradle
-        run: bash ./gradlew assembleRelease
+        run: bash ./gradlew assembleRelease -PwithFrpcExecFallback=false
       # 自动发布预览计划
       - name: Parse output-metadata.json and upload APKs to XUpdate
         run: |
@@ -180,12 +180,13 @@ jobs:
         env:
           FRP_REPO: ${{ env.FRP_REPO }}
           FRP_REF: ${{ env.FRP_REF }}
+          WITH_FRPC_EXEC_FALLBACK: "false"
         run: |
           bash scripts/prepare_custom_frpc_assets.sh
 
       - name: Build with custom frpc
         run: |
-          bash ./gradlew clean assembleRelease -PexcludeFrpclib=true -PwithFrpcPackage=true
+          bash ./gradlew clean assembleRelease -PexcludeFrpclib=true -PwithFrpcPackage=true -PwithFrpcExecFallback=false
 
       - name: Upload App To Artifact armeabi-v7a with_frpc
         if: success () || failure ()
@@ -214,6 +215,51 @@ jobs:
         with:
           name: "SmsF_${{ env.ver_name }}_500${{ env.ver_code }}_x86_64_release_with_frpc.apk"
           path: "${{ env.output }}/SmsF_*_x86_64_release_with_frpc.apk"
+
+      - name: Cleanup custom frpc assets before fallback build
+        if: always()
+        run: |
+          bash scripts/cleanup_custom_frpc_assets.sh || true
+
+      - name: Prepare custom frpc assets fallback
+        env:
+          FRP_REPO: ${{ env.FRP_REPO }}
+          FRP_REF: ${{ env.FRP_REF }}
+          WITH_FRPC_EXEC_FALLBACK: "true"
+        run: |
+          bash scripts/prepare_custom_frpc_assets.sh
+
+      - name: Build with custom frpc fallback
+        run: |
+          bash ./gradlew clean assembleRelease -PexcludeFrpclib=true -PwithFrpcPackage=true -PwithFrpcExecFallback=true
+
+      - name: Upload App To Artifact armeabi-v7a with_frpc_fallback
+        if: success () || failure ()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "SmsF_${{ env.ver_name }}_200${{ env.ver_code }}_armeabi-v7a_release_with_frpc_fallback.apk"
+          path: "${{ env.output }}/SmsF_*_armeabi-v7a_release_with_frpc_fallback.apk"
+
+      - name: Upload App To Artifact arm64-v8a with_frpc_fallback
+        if: success () || failure ()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "SmsF_${{ env.ver_name }}_300${{ env.ver_code }}_arm64-v8a_release_with_frpc_fallback.apk"
+          path: "${{ env.output }}/SmsF_*_arm64-v8a_release_with_frpc_fallback.apk"
+
+      - name: Upload App To Artifact x86 with_frpc_fallback
+        if: success () || failure ()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "SmsF_${{ env.ver_name }}_400${{ env.ver_code }}_x86_release_with_frpc_fallback.apk"
+          path: "${{ env.output }}/SmsF_*_x86_release_with_frpc_fallback.apk"
+
+      - name: Upload App To Artifact x86_64 with_frpc_fallback
+        if: success () || failure ()
+        uses: actions/upload-artifact@v4
+        with:
+          name: "SmsF_${{ env.ver_name }}_500${{ env.ver_code }}_x86_64_release_with_frpc_fallback.apk"
+          path: "${{ env.output }}/SmsF_*_x86_64_release_with_frpc_fallback.apk"
 
       - name: Cleanup custom frpc assets
         if: always()

@@ -80,6 +80,8 @@
 
 > ⚠ 定制 frpc 方案总结与运维手册：[`docs/FRPC_Custom_Build_and_Ops_ZH.md`](docs/FRPC_Custom_Build_and_Ops_ZH.md)
 
+> ⚠ 安装建议：优先安装 `with_frpc`；仅当日志出现 `permission denied` / `cannot run program` / `not executable` / custom backend unavailable 等兼容性问题时，再切换到 `with_frpc_fallback`。
+
 > ⚠ 上游同步详细指南（merge upstream -> fork）：[`docs/Fork_Upstream_Merge_Guide_ZH.md`](docs/Fork_Upstream_Merge_Guide_ZH.md)
 
 --------

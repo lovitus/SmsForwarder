@@ -83,7 +83,11 @@ git push fork v3.5.0-mergecheck.1
 - 产物矩阵符合预期：
   - 标准包 5 个
   - with_frpc 4 个（无 universal）
+  - with_frpc_fallback 4 个（无 universal）
 - with_frpc 抽样验包：
+  - 有 `libfrpc.so`
+  - 无 `assets/frpc/**`
+- with_frpc_fallback 抽样验包：
   - 有 `libfrpc.so`
   - 有 `assets/frpc/*/frpc.bin`
   - 无 `libgojni.so`
@@ -112,4 +116,3 @@ git push fork v3.5.0-mergecheck.1
 - 已通过 Actions 构建验证
 - 已验包（`libfrpc.so` / `frpc.bin` / 无 `libgojni.so`）
 - 已记录同步批次与对应 tag
-

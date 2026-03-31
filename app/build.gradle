@@ -25,7 +25,9 @@ ext.enableXaop = gradle.startParameter.taskNames.any { name ->
 }
 println "[XAOP] enable = ${enableXaop}, tasks = ${gradle.startParameter.taskNames}"
 def withFrpcPackage = (project.findProperty("withFrpcPackage") ?: "false").toString().toBoolean()
+def withFrpcExecFallback = (project.findProperty("withFrpcExecFallback") ?: "false").toString().toBoolean()
 println "[FRPC] withFrpcPackage = ${withFrpcPackage}"
+println "[FRPC] withFrpcExecFallback = ${withFrpcExecFallback}"
 
 def keyProps = new Properties()
 def keyPropsFile = rootProject.file('keystore/keystore.properties')
@@ -74,11 +76,13 @@ android {
         minSdkVersion build_versions.min_sdk
         targetSdkVersion build_versions.target_sdk
         versionCode build_versions.version_code
-        versionName = "${build_versions.version_name}.${buildDate}"
+        def frpcVersionSuffix = withFrpcExecFallback ? "-frpcfb" : ""
+        versionName = "${build_versions.version_name}.${buildDate}${frpcVersionSuffix}"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         buildConfigField "String", "BUILD_TIME", "\"${buildTime}\""
         buildConfigField "String", "GIT_COMMIT_ID", "\"${gitCommitId}\""
         buildConfigField "boolean", "WITH_FRPC_PACKAGE", "${withFrpcPackage}"
+        buildConfigField "boolean", "WITH_FRPC_EXEC_FALLBACK", "${withFrpcExecFallback}"
 
         multiDexEnabled true
         //vectorDrawables.useSupportLibrary = true
@@ -212,7 +216,7 @@ android {
             def abiName = output.getFilter(com.android.build.OutputFile.ABI)
             if (abiName == null) abiName = "universal"
             output.versionCodeOverride = abiCodes.get(abiName, 0) * 100000 + variant.versionCode
-            def frpcSuffix = withFrpcPackage ? "_with_frpc" : ""
+            def frpcSuffix = withFrpcPackage ? (withFrpcExecFallback ? "_with_frpc_fallback" : "_with_frpc") : ""
             output.outputFileName = "SmsF_${versionName}_${output.versionCode}_${abiName}_${variant.name}${frpcSuffix}.apk"
 
             // 修改 output-metadata.json 追加编译日期、编译时间、Git Commit ID
