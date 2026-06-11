@@ -227,6 +227,14 @@ jobs:
             echo "- Workflow: \`${GITHUB_WORKFLOW}\` #${GITHUB_RUN_NUMBER}"
             echo "- Build Time (UTC): $(date -u +"%Y-%m-%d %H:%M:%S")"
             echo
+            echo "## Release Highlights"
+            echo "- Added QR code offline clone mode: export compressed CloneInfo as multiple QR codes and restore by continuous scanning."
+            echo "- QR import supports out-of-order scans, duplicate de-duplication, session/sha256 validation, and restore reminders for device name and Frpc port/proxy names."
+            echo "- QR generation now runs heavy export/encoding work off the main thread and recycles displayed QR bitmaps on page switch or dialog close."
+            echo "- Reduced non-functional background work: Cactus diagnostic timer now runs every 60 seconds instead of every second and disposes stale timers before restarting."
+            echo "- Reduced battery broadcast overhead: task-table queries now run only when the relevant battery level or charge state actually changes."
+            echo "- Fixed clone pull button countdown handling so pull actions use the pull countdown helper."
+            echo
             echo "## Package Matrix"
             echo "- Standard APKs: universal + armeabi-v7a + arm64-v8a + x86 + x86_64"
             echo "- With Frpc APKs: armeabi-v7a + arm64-v8a + x86 + x86_64 (no universal, recommended)"

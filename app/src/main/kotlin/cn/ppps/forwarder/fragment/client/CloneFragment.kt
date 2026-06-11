@@ -2,10 +2,14 @@ package cn.ppps.forwarder.fragment.client
 
 import android.annotation.SuppressLint
 import android.content.Intent
+import android.graphics.Bitmap
 import android.os.Environment
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
+import android.widget.Button
+import android.widget.ImageView
+import android.widget.TextView
 import cn.ppps.forwarder.App
 import cn.ppps.forwarder.R
 import cn.ppps.forwarder.activity.MainActivity
@@ -15,6 +19,7 @@ import cn.ppps.forwarder.entity.CloneInfo
 import cn.ppps.forwarder.server.model.BaseResponse
 import cn.ppps.forwarder.utils.AppUtils
 import cn.ppps.forwarder.utils.Base64
+import cn.ppps.forwarder.utils.CloneQrUtils
 import cn.ppps.forwarder.utils.CommonUtils
 import cn.ppps.forwarder.utils.HttpServerUtils
 import cn.ppps.forwarder.utils.KEY_DEFAULT_SELECTION
@@ -31,6 +36,7 @@ import com.hjq.permissions.OnPermissionCallback
 import com.hjq.permissions.XXPermissions
 import com.hjq.permissions.permission.PermissionLists
 import com.hjq.permissions.permission.base.IPermission
+import com.google.zxing.integration.android.IntentIntegrator
 import com.xuexiang.xaop.annotation.SingleClick
 import com.xuexiang.xhttp2.XHttp
 import com.xuexiang.xhttp2.cache.model.CacheMode
@@ -62,6 +68,10 @@ class CloneFragment : BaseFragment<FragmentClientCloneBinding?>(), View.OnClickL
     private var pullCountDownHelper: CountDownButtonHelper? = null
     private var exportCountDownHelper: CountDownButtonHelper? = null
     private var importCountDownHelper: CountDownButtonHelper? = null
+    private val qrScannedChunks = linkedMapOf<Int, CloneQrUtils.QrChunk>()
+    private var qrScanSessionId: String? = null
+    private var qrScanTotal: Int = 0
+    private var qrScanSha256: String? = null
 
     @JvmField
     @AutoWired(name = KEY_DEFAULT_SELECTION)
@@ -117,19 +127,12 @@ class CloneFragment : BaseFragment<FragmentClientCloneBinding?>(), View.OnClickL
         binding!!.tabBar.setTabTitles(getStringArray(R.array.clone_type_option))
         binding!!.tabBar.setOnTabClickListener { _, position ->
             //XToastUtils.toast("点击了$title--$position")
-            if (position == 1) {
-                binding!!.layoutNetwork.visibility = View.GONE
-                binding!!.layoutOffline.visibility = View.VISIBLE
-            } else {
-                binding!!.layoutNetwork.visibility = View.VISIBLE
-                binding!!.layoutOffline.visibility = View.GONE
-            }
+            showCloneMode(position)
         }
         //通用设置界面跳转时只使用离线模式
         if (defaultSelection == 1) {
             binding!!.tabBar.visibility = View.GONE
-            binding!!.layoutNetwork.visibility = View.GONE
-            binding!!.layoutOffline.visibility = View.VISIBLE
+            showCloneMode(1)
         }
 
         //按钮增加倒计时，避免重复点击
@@ -180,6 +183,8 @@ class CloneFragment : BaseFragment<FragmentClientCloneBinding?>(), View.OnClickL
         binding!!.btnPull.setOnClickListener(this)
         binding!!.btnExport.setOnClickListener(this)
         binding!!.btnImport.setOnClickListener(this)
+        binding!!.btnQrExport.setOnClickListener(this)
+        binding!!.btnQrImport.setOnClickListener(this)
     }
 
     @SingleClick
@@ -189,6 +194,10 @@ class CloneFragment : BaseFragment<FragmentClientCloneBinding?>(), View.OnClickL
             R.id.btn_push -> pushData()
             //拉取配置
             R.id.btn_pull -> pullData()
+            //生成二维码
+            R.id.btn_qr_export -> confirmQrExport()
+            //扫码导入
+            R.id.btn_qr_import -> startQrImport()
             //导出配置
             R.id.btn_export -> {
                 try {
@@ -260,6 +269,313 @@ class CloneFragment : BaseFragment<FragmentClientCloneBinding?>(), View.OnClickL
         }
     }
 
+    private fun showCloneMode(position: Int) {
+        binding!!.layoutNetwork.visibility = if (position == 0) View.VISIBLE else View.GONE
+        binding!!.layoutOffline.visibility = if (position == 1) View.VISIBLE else View.GONE
+        binding!!.layoutQr.visibility = if (position == 2) View.VISIBLE else View.GONE
+    }
+
+    private fun confirmQrExport() {
+        MaterialDialog.Builder(requireContext())
+            .iconRes(R.drawable.icon_api_clone)
+            .title(R.string.clone_qr_export_title)
+            .content(R.string.clone_qr_sensitive_warning)
+            .positiveText(R.string.confirm)
+            .negativeText(R.string.cancel)
+            .onPositive { _: MaterialDialog?, _: DialogAction? -> generateQrExport() }
+            .show()
+    }
+
+    private fun generateQrExport() {
+        val root = binding?.root ?: return
+        Thread({
+            try {
+                val cloneInfo = HttpServerUtils.exportSettings()
+                val jsonStr = Gson().toJson(cloneInfo)
+                val qrPackage = CloneQrUtils.buildPackage(jsonStr)
+                Log.i(TAG, "Generated clone QR session=${qrPackage.sessionId} total=${qrPackage.total}")
+                root.post {
+                    if (isAdded && binding != null) {
+                        showQrExportDialog(qrPackage)
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+                Log.e(TAG, "generateQrExport error: ${e.message}")
+                val message = e.message
+                root.post {
+                    if (isAdded && binding != null) {
+                        XToastUtils.error(String.format(getString(R.string.export_failed_tips), message))
+                    }
+                }
+            }
+        }, "clone-qr-export").start()
+    }
+
+    private fun showQrExportDialog(qrPackage: CloneQrUtils.QrPackage) {
+        val dialogView = LayoutInflater.from(requireContext()).inflate(R.layout.dialog_clone_qr_export, null)
+        val tvProgress = dialogView.findViewById<TextView>(R.id.tv_qr_progress)
+        val tvSummary = dialogView.findViewById<TextView>(R.id.tv_qr_summary)
+        val ivQrCode = dialogView.findViewById<ImageView>(R.id.iv_qr_code)
+        val btnPrev = dialogView.findViewById<Button>(R.id.btn_qr_prev)
+        val btnNext = dialogView.findViewById<Button>(R.id.btn_qr_next)
+        var index = 0
+        var currentBitmap: Bitmap? = null
+        var renderToken = 0
+        var dialogDismissed = false
+
+        fun recycleCurrentBitmap() {
+            ivQrCode.setImageDrawable(null)
+            currentBitmap?.let { bitmap ->
+                if (!bitmap.isRecycled) {
+                    bitmap.recycle()
+                }
+            }
+            currentBitmap = null
+        }
+
+        fun updateButtons(enabled: Boolean) {
+            btnPrev.isEnabled = enabled && index > 0
+            btnNext.isEnabled = enabled && index < qrPackage.total - 1
+        }
+
+        fun renderQr() {
+            val targetIndex = index
+            val token = ++renderToken
+            tvProgress.text = String.format(getString(R.string.clone_qr_progress), index + 1, qrPackage.total)
+            tvSummary.text = getString(R.string.clone_qr_summary)
+            updateButtons(false)
+
+            Thread({
+                var bitmap: Bitmap? = null
+                try {
+                    bitmap = CloneQrUtils.createQrBitmap(qrPackage.chunks[targetIndex])
+                    val result = bitmap
+                    val root = binding?.root
+                    if (root == null) {
+                        if (result?.isRecycled == false) {
+                            result.recycle()
+                        }
+                    } else {
+                        root.post {
+                            if (!isAdded || binding == null || dialogDismissed || token != renderToken || result == null) {
+                                if (result?.isRecycled == false) {
+                                    result.recycle()
+                                }
+                                return@post
+                            }
+                            recycleCurrentBitmap()
+                            currentBitmap = result
+                            ivQrCode.setImageBitmap(result)
+                            updateButtons(true)
+                        }
+                    }
+                } catch (e: Exception) {
+                    if (bitmap?.isRecycled == false) {
+                        bitmap.recycle()
+                    }
+                    val message = e.message
+                    val root = binding?.root
+                    if (root != null) {
+                        root.post {
+                            if (isAdded && binding != null && !dialogDismissed && token == renderToken) {
+                                updateButtons(true)
+                                XToastUtils.error(String.format(getString(R.string.export_failed_tips), message))
+                            }
+                        }
+                    }
+                }
+            }, "clone-qr-render").start()
+        }
+
+        btnPrev.setOnClickListener {
+            if (index > 0) {
+                index--
+                renderQr()
+            }
+        }
+        btnNext.setOnClickListener {
+            if (index < qrPackage.total - 1) {
+                index++
+                renderQr()
+            }
+        }
+        renderQr()
+
+        val dialog = MaterialDialog.Builder(requireContext())
+            .iconRes(R.drawable.icon_api_clone)
+            .title(R.string.clone_qr_export_title)
+            .customView(dialogView, true)
+            .positiveText(R.string.confirm)
+            .show()
+        dialog.setOnDismissListener {
+            dialogDismissed = true
+            renderToken++
+            recycleCurrentBitmap()
+        }
+    }
+
+    private fun startQrImport() {
+        resetQrScanState()
+        XXPermissions.with(this)
+            .permission(PermissionLists.getCameraPermission())
+            .request(object : OnPermissionCallback {
+                override fun onResult(grantedList: MutableList<IPermission>, deniedList: MutableList<IPermission>) {
+                    val allGranted = deniedList.isEmpty()
+                    if (!allGranted) {
+                        val doNotAskAgain = XXPermissions.isDoNotAskAgainPermissions(requireActivity(), deniedList)
+                        if (doNotAskAgain) {
+                            XToastUtils.error(R.string.toast_denied_never)
+                            XXPermissions.startPermissionActivity(requireContext(), deniedList)
+                        } else {
+                            XToastUtils.error(R.string.toast_denied)
+                        }
+                        return
+                    }
+                    launchQrScanner()
+                }
+            })
+    }
+
+    @Suppress("DEPRECATION")
+    private fun launchQrScanner() {
+        val integrator = IntentIntegrator(requireActivity())
+        integrator
+            .setDesiredBarcodeFormats(IntentIntegrator.QR_CODE)
+            .setPrompt(getString(R.string.clone_qr_scan_prompt))
+            .setBeepEnabled(false)
+            .setBarcodeImageEnabled(false)
+            .setOrientationLocked(true)
+        startActivityForResult(integrator.createScanIntent(), IntentIntegrator.REQUEST_CODE)
+    }
+
+    @Deprecated("Deprecated in AndroidX Fragment, required by zxing-android-embedded 3.6.0")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        val result = IntentIntegrator.parseActivityResult(requestCode, resultCode, data)
+        if (result != null) {
+            handleQrScanResult(result.contents)
+            return
+        }
+        super.onActivityResult(requestCode, resultCode, data)
+    }
+
+    private fun handleQrScanResult(contents: String?) {
+        if (contents.isNullOrBlank()) {
+            XToastUtils.info(getString(R.string.clone_qr_scan_cancelled))
+            return
+        }
+
+        try {
+            val chunk = CloneQrUtils.parseChunk(contents)
+            acceptQrChunk(chunk)
+
+            if (qrScannedChunks.size < qrScanTotal) {
+                XToastUtils.info(String.format(getString(R.string.clone_qr_scan_progress), qrScannedChunks.size, qrScanTotal))
+                continueQrScan()
+                return
+            }
+
+            val jsonStr = CloneQrUtils.mergeChunks(qrScannedChunks.values)
+            restoreQrSettings(jsonStr)
+            resetQrScanState()
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Log.e(TAG, "handleQrScanResult error: ${e.message}")
+            val message = if (e.message == "session mismatch") {
+                getString(R.string.clone_qr_session_mismatch)
+            } else {
+                String.format(getString(R.string.clone_qr_invalid), e.message)
+            }
+            XToastUtils.error(message)
+            if (qrScanSessionId != null && qrScanTotal > 0 && qrScannedChunks.size < qrScanTotal) {
+                continueQrScan()
+            }
+        }
+    }
+
+    private fun acceptQrChunk(chunk: CloneQrUtils.QrChunk) {
+        if (qrScanSessionId == null) {
+            qrScanSessionId = chunk.sessionId
+            qrScanTotal = chunk.total
+            qrScanSha256 = chunk.sha256
+        }
+
+        require(qrScanSessionId == chunk.sessionId) { "session mismatch" }
+        require(qrScanTotal == chunk.total) { "total mismatch" }
+        require(qrScanSha256 == chunk.sha256) { "sha256 mismatch" }
+
+        val old = qrScannedChunks[chunk.index]
+        if (old != null) {
+            require(old.payload == chunk.payload) { "duplicate chunk mismatch" }
+            return
+        }
+        qrScannedChunks[chunk.index] = chunk
+    }
+
+    private fun continueQrScan() {
+        val root = binding?.root ?: return
+        root.postDelayed({
+            if (isAdded && binding != null && qrScanTotal > 0 && qrScannedChunks.size < qrScanTotal) {
+                launchQrScanner()
+            }
+        }, 800)
+    }
+
+    private fun restoreQrSettings(jsonStr: String) {
+        try {
+            if (TextUtils.isEmpty(jsonStr)) {
+                XToastUtils.error(getString(R.string.import_failed))
+                return
+            }
+
+            val builder = GsonBuilder()
+            builder.registerTypeAdapter(Date::class.java, JsonDeserializer<Any?> { _, _, _ -> Date() })
+            val gson = builder.create()
+            val cloneInfo = gson.fromJson(jsonStr, CloneInfo::class.java)
+            if (cloneInfo == null) {
+                XToastUtils.error(getString(R.string.import_failed))
+                return
+            }
+            Log.d(TAG, "cloneInfo = $cloneInfo")
+
+            HttpServerUtils.compareVersion(cloneInfo)
+
+            if (HttpServerUtils.restoreSettings(cloneInfo)) {
+                showQrRestoreSuccessDialog()
+            } else {
+                XToastUtils.error(getString(R.string.import_failed))
+            }
+        } catch (e: Exception) {
+            e.printStackTrace()
+            Log.e(TAG, "restoreQrSettings error: ${e.message}")
+            XToastUtils.error(String.format(getString(R.string.import_failed_tips), e.message))
+        }
+    }
+
+    private fun showQrRestoreSuccessDialog() {
+        MaterialDialog.Builder(requireContext())
+            .iconRes(R.drawable.icon_api_clone)
+            .title(R.string.clone_qr_import_title)
+            .content(R.string.clone_qr_import_succeeded_reminder)
+            .cancelable(false)
+            .positiveText(R.string.confirm)
+            .onPositive { _: MaterialDialog?, _: DialogAction? -> restartApp() }
+            .show()
+    }
+
+    private fun resetQrScanState() {
+        qrScannedChunks.clear()
+        qrScanSessionId = null
+        qrScanTotal = 0
+        qrScanSha256 = null
+    }
+
+    private fun restartApp() {
+        val intent = Intent(App.context, MainActivity::class.java)
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        startActivity(intent)
+    }
+
     //推送配置
     private fun pushData() {
         if (!CommonUtils.checkUrl(HttpServerUtils.serverAddress)) {
@@ -298,6 +614,7 @@ class CloneFragment : BaseFragment<FragmentClientCloneBinding?>(), View.OnClickL
                     XToastUtils.error(getString(R.string.request_failed) + e.message)
                     e.printStackTrace()
                     Log.e(TAG, e.toString())
+                    pushCountDownHelper?.finish()
                     return
                 }
                 postRequest.upString(requestMsg)
@@ -314,6 +631,7 @@ class CloneFragment : BaseFragment<FragmentClientCloneBinding?>(), View.OnClickL
                     XToastUtils.error(getString(R.string.request_failed) + e.message)
                     e.printStackTrace()
                     Log.e(TAG, e.toString())
+                    pushCountDownHelper?.finish()
                     return
                 }
                 postRequest.upString(requestMsg)
@@ -368,7 +686,7 @@ class CloneFragment : BaseFragment<FragmentClientCloneBinding?>(), View.OnClickL
             return
         }
 
-        exportCountDownHelper?.start()
+        pullCountDownHelper?.start()
 
         val requestUrl: String = HttpServerUtils.serverAddress + "/clone/pull"
         Log.i(TAG, "requestUrl:$requestUrl")
@@ -401,6 +719,7 @@ class CloneFragment : BaseFragment<FragmentClientCloneBinding?>(), View.OnClickL
                     XToastUtils.error(getString(R.string.request_failed) + e.message)
                     e.printStackTrace()
                     Log.e(TAG, e.toString())
+                    pullCountDownHelper?.finish()
                     return
                 }
                 postRequest.upString(requestMsg)
@@ -417,6 +736,7 @@ class CloneFragment : BaseFragment<FragmentClientCloneBinding?>(), View.OnClickL
                     XToastUtils.error(getString(R.string.request_failed) + e.message)
                     e.printStackTrace()
                     Log.e(TAG, e.toString())
+                    pullCountDownHelper?.finish()
                     return
                 }
                 postRequest.upString(requestMsg)
@@ -430,7 +750,7 @@ class CloneFragment : BaseFragment<FragmentClientCloneBinding?>(), View.OnClickL
         postRequest.execute(object : SimpleCallBack<String>() {
             override fun onError(e: ApiException) {
                 XToastUtils.error(e.displayMessage)
-                exportCountDownHelper?.finish()
+                pullCountDownHelper?.finish()
             }
 
             override fun onSuccess(response: String) {
@@ -477,7 +797,7 @@ class CloneFragment : BaseFragment<FragmentClientCloneBinding?>(), View.OnClickL
                     Log.e(TAG, e.toString())
                     XToastUtils.error(getString(R.string.request_failed) + response)
                 }
-                exportCountDownHelper?.finish()
+                pullCountDownHelper?.finish()
             }
         })
 

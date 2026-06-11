@@ -78,6 +78,10 @@ See more screenshots：https://github.com/pppscn/SmsForwarder/wiki
 
 > ⚠ Install guidance: use `with_frpc` first; switch to `with_frpc_fallback` only when logs show compatibility errors such as `permission denied`, `cannot run program`, `not executable`, or custom backend unavailable.
 
+> ⚠ QR offline clone guide (Chinese): [`docs/QR_Offline_Clone_ZH.md`](docs/QR_Offline_Clone_ZH.md)
+
+> ⚠ Power optimization notes (Chinese): [`docs/Power_Optimization_ZH.md`](docs/Power_Optimization_ZH.md)
+
 > ⚠ Upstream merge guide for fork (Chinese): [`docs/Fork_Upstream_Merge_Guide_ZH.md`](docs/Fork_Upstream_Merge_Guide_ZH.md)
 
 --------

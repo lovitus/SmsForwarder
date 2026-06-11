@@ -26,19 +26,6 @@ class BatteryReceiver : BroadcastReceiver() {
 
         if (context == null || intent?.action != Intent.ACTION_BATTERY_CHANGED) return
 
-        val hasBatteryTask = try {
-            Core.task.hasByType(TASK_CONDITION_BATTERY)
-        } catch (e: Exception) {
-            Log.e(TAG, "query battery task failed: ${e.message}")
-            false
-        }
-        val hasChargeTask = try {
-            Core.task.hasByType(TASK_CONDITION_CHARGE)
-        } catch (e: Exception) {
-            Log.e(TAG, "query charge task failed: ${e.message}")
-            false
-        }
-
         val batteryInfo = BatteryUtils.getBatteryInfo(intent).toString()
         TaskUtils.batteryInfo = batteryInfo
 
@@ -59,6 +46,27 @@ class BatteryReceiver : BroadcastReceiver() {
         val statusOld = TaskUtils.batteryStatus
         val isStatusChanged = statusNew != statusOld
         TaskUtils.batteryStatus = statusNew
+
+        val hasBatteryTask = if (isLevelChanged) {
+            try {
+                Core.task.hasByType(TASK_CONDITION_BATTERY)
+            } catch (e: Exception) {
+                Log.e(TAG, "query battery task failed: ${e.message}")
+                false
+            }
+        } else {
+            false
+        }
+        val hasChargeTask = if (isPluggedChanged || isStatusChanged) {
+            try {
+                Core.task.hasByType(TASK_CONDITION_CHARGE)
+            } catch (e: Exception) {
+                Log.e(TAG, "query charge task failed: ${e.message}")
+                false
+            }
+        } else {
+            false
+        }
 
         //电量改变
         if (isLevelChanged && hasBatteryTask) {

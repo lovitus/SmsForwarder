@@ -44,6 +44,7 @@
     <string name="call_type_option_received">已接來電</string>
     <string name="clone_type_option_network">網路模式</string>
     <string name="clone_type_option_offline">離線模式</string>
+    <string name="clone_type_option_qr">二維碼模式</string>
     <string name="app_type_option_user">用戶應用</string>
     <string name="app_type_option_system">系統應用</string>
     <string name="task_type_option_mine">我的任務</string>
@@ -384,6 +385,7 @@
     <!--CloneActivity-->
     <string name="operating_instruction">嚴正聲明：\n該功能僅限個人新舊手機切換使用，用於非法用途後果自負！\n\n操作說明：\n1.新舊手機連接同一個WiFi網絡(禁用AP隔離)，如需穿透內網請先配置Frpc\n2.【二選一】舊手機點【推送】按鈕，將本機的配置推送到服務端\n3.【二選一】新手機點【拉取】按鈕，將拉取服務端的配置到本機\n\n注意事項：\n1.客戶端與服務端的APP版本必須一致，才能克隆!\n2.導入成功後，發送通道、轉發規則將完全被覆蓋，清空歷史記錄！\n3.主動請求、保活措施、個性設置不在克隆範圍\n4.導入成功後，務必再次進入【通用設置】開關一次你需要的功能！(或去系統設置手動授權權限)</string>
     <string name="operating_instruction_offline">嚴正聲明：\n該功能僅限個人新舊手機切換使用，用於非法用途後果自負！\n\n注意事項：\n1.導出方與導入方的APP版本必須一致，才能一鍵克隆!\n2.新手機導入成功後，發送通道、轉發規則將完全被覆蓋，清空歷史記錄！\n3.主動請求、保活措施、個性設置不在克隆範圍\n4.導入成功後，務必再次進入【通用設置】開關一次你需要的功能！(或去系統設置手動授權權限)</string>
+    <string name="operating_instruction_qr">嚴正聲明：\n該功能僅限個人新舊手機切換使用，用於非法用途後果自負！\n\n二維碼模式完全離線，不依賴同 WiFi 或 HTTP 服務。\n\n操作說明：\n1.舊手機點擊【生成二維碼】，按順序展示所有二維碼。\n2.新手機點擊【掃碼導入】，連續掃描舊手機上的二維碼；支援亂序和重複掃碼。\n3.收齊後自動校驗、解壓並恢復配置。\n\n注意事項：\n1.二維碼內容未加密，安全級別等同目前 JSON 文件導出，請勿分享給他人。\n2.導出方與導入方的 APP 版本必須一致，才能一鍵克隆。\n3.導入成功後，發送通道、轉發規則、Frpc 配置將完全被覆蓋，清空歷史記錄。\n4.導入成功後，請修改【通用設置】裡的設備名稱，並檢查 Frpc 配置裡的端口和代理名。</string>
     <string name="push">推送</string>
     <string name="pull">拉取</string>
     <string name="stop">停止</string>
@@ -819,6 +821,21 @@
     <string name="export_succeeded">導出配置成功！</string>
     <string name="export_failed">導出失敗，請檢查寫入權限！</string>
     <string name="export_failed_tips">導出失敗: %s</string>
+    <string name="clone_qr_generate">生成\n二維碼</string>
+    <string name="clone_qr_scan">掃碼\n導入</string>
+    <string name="clone_qr_export_title">二維碼導出</string>
+    <string name="clone_qr_import_title">二維碼導入</string>
+    <string name="clone_qr_sensitive_warning">二維碼包含完整克隆配置，未加密，安全級別等同 JSON 文件導出。請只在可信環境展示和掃碼。</string>
+    <string name="clone_qr_progress">第 %1$d / %2$d 張</string>
+    <string name="clone_qr_summary">請在舊手機上切換二維碼，新手機逐一掃描。每張二維碼固定 512x512 像素生成。</string>
+    <string name="clone_qr_prev">上一張</string>
+    <string name="clone_qr_next">下一張</string>
+    <string name="clone_qr_scan_prompt">請掃描 SmsForwarder 克隆二維碼</string>
+    <string name="clone_qr_scan_progress">已掃描 %1$d / %2$d 張，繼續掃描下一張。</string>
+    <string name="clone_qr_scan_cancelled">已取消掃碼</string>
+    <string name="clone_qr_invalid">二維碼無效：%1$s</string>
+    <string name="clone_qr_session_mismatch">此二維碼不屬於目前掃描批次，請繼續掃描同一組二維碼。</string>
+    <string name="clone_qr_import_succeeded_reminder">導入配置成功！\n需要重啟 APP 以便生效！\n\n重啟後請務必檢查：\n1. 修改【通用設置】裡的設備名稱，避免新舊手機名稱重複。\n2. 檢查 Frpc 配置裡的端口和代理名，避免與舊設備衝突。\n3. 再次核對所有配置項。</string>
     <string name="import_failed">導入失敗：請檢查是否有外部存儲訪問權限！</string>
     <string name="import_failed_file_not_exist">導入失敗：本地備份文件不存在！</string>
     <string name="import_succeeded">導入配置成功！\n需要重啟APP以便生效！\n重啟後請再次核對所有配置項！</string>

@@ -44,6 +44,7 @@
     <string name="call_type_option_received">已接来电</string>
     <string name="clone_type_option_network">网络模式</string>
     <string name="clone_type_option_offline">离线模式</string>
+    <string name="clone_type_option_qr">二维码模式</string>
     <string name="app_type_option_user">用户应用</string>
     <string name="app_type_option_system">系统应用</string>
     <string name="task_type_option_mine">我的任务</string>
@@ -384,6 +385,7 @@
     <!--CloneActivity-->
     <string name="operating_instruction">严正声明：\n该功能仅限个人新旧手机切换使用，用于非法用途后果自负！\n\n操作说明：\n1.新旧手机连接同一个WiFi网络(禁用AP隔离)，如需穿透内网请先配置Frpc\n2.【二选一】旧手机点【推送】按钮，将本机的配置推送到服务端\n3.【二选一】新手机点【拉取】按钮，将拉取服务端的配置到本机\n\n注意事项：\n1.客户端与服务端的APP版本必须一致，才能克隆!\n2.导入成功后，发送通道、转发规则将完全被覆盖，清空历史记录！\n3.主动请求、保活措施、个性设置不在克隆范围\n4.导入成功后，务必再次进入【通用设置】开关一次你需要的功能！(或去系统设置手动授权权限)</string>
     <string name="operating_instruction_offline">严正声明：\n该功能仅限个人新旧手机切换使用，用于非法用途后果自负！\n\n注意事项：\n1.导出方与导入方的APP版本必须一致，才能一键克隆!\n2.新手机导入成功后，发送通道、转发规则将完全被覆盖，清空历史记录！\n3.主动请求、保活措施、个性设置不在克隆范围\n4.导入成功后，务必再次进入【通用设置】开关一次你需要的功能！(或去系统设置手动授权权限)</string>
+    <string name="operating_instruction_qr">严正声明：\n该功能仅限个人新旧手机切换使用，用于非法用途后果自负！\n\n二维码模式完全离线，不依赖同 WiFi 或 HTTP 服务。\n\n操作说明：\n1.旧手机点击【生成二维码】，按顺序展示所有二维码。\n2.新手机点击【扫码导入】，连续扫描旧手机上的二维码；支持乱序和重复扫码。\n3.收齐后自动校验、解压并恢复配置。\n\n注意事项：\n1.二维码内容未加密，安全级别等同当前 JSON 文件导出，请勿分享给他人。\n2.导出方与导入方的 APP 版本必须一致，才能一键克隆。\n3.导入成功后，发送通道、转发规则、Frpc 配置将完全被覆盖，清空历史记录。\n4.导入成功后，请修改【通用设置】里的设备名称，并检查 Frpc 配置里的端口和代理名。</string>
     <string name="push">推送</string>
     <string name="pull">拉取</string>
     <string name="stop">停止</string>
@@ -819,6 +821,21 @@
     <string name="export_succeeded">导出配置成功！</string>
     <string name="export_failed">导出失败，请检查写入权限！</string>
     <string name="export_failed_tips">导出失败: %s</string>
+    <string name="clone_qr_generate">生成\n二维码</string>
+    <string name="clone_qr_scan">扫码\n导入</string>
+    <string name="clone_qr_export_title">二维码导出</string>
+    <string name="clone_qr_import_title">二维码导入</string>
+    <string name="clone_qr_sensitive_warning">二维码包含完整克隆配置，未加密，安全级别等同 JSON 文件导出。请只在可信环境展示和扫码。</string>
+    <string name="clone_qr_progress">第 %1$d / %2$d 张</string>
+    <string name="clone_qr_summary">请在旧手机上切换二维码，新手机逐一扫描。每张二维码固定 512x512 像素生成。</string>
+    <string name="clone_qr_prev">上一张</string>
+    <string name="clone_qr_next">下一张</string>
+    <string name="clone_qr_scan_prompt">请扫描 SmsForwarder 克隆二维码</string>
+    <string name="clone_qr_scan_progress">已扫描 %1$d / %2$d 张，继续扫描下一张。</string>
+    <string name="clone_qr_scan_cancelled">已取消扫码</string>
+    <string name="clone_qr_invalid">二维码无效：%1$s</string>
+    <string name="clone_qr_session_mismatch">此二维码不属于当前扫描批次，请继续扫描同一组二维码。</string>
+    <string name="clone_qr_import_succeeded_reminder">导入配置成功！\n需要重启 APP 以便生效！\n\n重启后请务必检查：\n1. 修改【通用设置】里的设备名称，避免新旧手机名称重复。\n2. 检查 Frpc 配置里的端口和代理名，避免与旧设备冲突。\n3. 再次核对所有配置项。</string>
     <string name="import_failed">导入失败：请检查是否有外部存储访问权限！</string>
     <string name="import_failed_file_not_exist">导入失败：本地备份文件不存在！</string>
     <string name="import_succeeded">导入配置成功！\n需要重启APP以便生效！\n重启后请再次核对所有配置项！</string>

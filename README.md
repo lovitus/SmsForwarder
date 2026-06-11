@@ -82,6 +82,10 @@
 
 > ⚠ 安装建议：优先安装 `with_frpc`；仅当日志出现 `permission denied` / `cannot run program` / `not executable` / custom backend unavailable 等兼容性问题时，再切换到 `with_frpc_fallback`。
 
+> ⚠ 二维码离线迁移说明：[`docs/QR_Offline_Clone_ZH.md`](docs/QR_Offline_Clone_ZH.md)
+
+> ⚠ 省电优化说明：[`docs/Power_Optimization_ZH.md`](docs/Power_Optimization_ZH.md)
+
 > ⚠ 上游同步详细指南（merge upstream -> fork）：[`docs/Fork_Upstream_Merge_Guide_ZH.md`](docs/Fork_Upstream_Merge_Guide_ZH.md)
 
 --------

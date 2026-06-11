@@ -366,6 +366,7 @@ class App : Application(), CactusCallback, Configuration.Provider by Core {
     @SuppressLint("CheckResult")
     override fun doWork(times: Int) {
         Log.d(TAG, "doWork:$times")
+        mDisposable?.let { if (!it.isDisposed) it.dispose() }
         mStatus.postValue(true)
         val dateFormat = SimpleDateFormat("HH:mm:ss", Locale.getDefault())
         dateFormat.timeZone = TimeZone.getTimeZone("GMT+00:00")
@@ -377,8 +378,11 @@ class App : Application(), CactusCallback, Configuration.Provider by Core {
         }
         mLastTimer.postValue(dateFormat.format(Date(CactusSave.lastTimer * 1000)))
         mEndDate.postValue(CactusSave.endDate)
-        mDisposable = Observable.interval(1, TimeUnit.SECONDS).map {
-            oldTimer + it
+        val startedAt = System.currentTimeMillis()
+        // Intentionally sample once per minute to reduce wakeups and SP writes.
+        // This trades exact shutdown accuracy for battery savings: persisted uptime may lag by up to 59s.
+        mDisposable = Observable.interval(1, 60, TimeUnit.SECONDS).map {
+            oldTimer + ((System.currentTimeMillis() - startedAt) / 1000)
         }.subscribeOn(Schedulers.io()).observeOn(AndroidSchedulers.mainThread()).subscribe { aLong ->
             CactusSave.timer = aLong
             CactusSave.date = SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).run {

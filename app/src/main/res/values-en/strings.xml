@@ -44,6 +44,7 @@
     <string name="call_type_option_received">Received</string>
     <string name="clone_type_option_network">Network</string>
     <string name="clone_type_option_offline">Offline</string>
+    <string name="clone_type_option_qr">QR Code</string>
     <string name="app_type_option_user">User App</string>
     <string name="app_type_option_system">System App</string>
     <string name="task_type_option_mine">Mine</string>
@@ -383,6 +384,7 @@
     <!--CloneActivity-->
     <string name="operating_instruction">Important Note:\nThis feature is intended solely for personal use in switching between old and new phones. Any consequences arising from illegal use are the user\'s responsibility!\n\nInstructions:\n1. Connect both old and new phones to the same WiFi network (disable AP isolation). If internal network penetration is needed, configure Frpc first.\n2. [Choose One] On the old phone, tap the "Push" button to send this device\'s configuration to the server.\n3. [Choose One] On the new phone, tap the "Pull" button to fetch the server\'s configuration to this device.\n\nNotes:\n1. The client and server app versions must match for successful cloning.\n2. Upon successful import, the senders and forwarding rules will be entirely replaced, clearing the historical records.\n3. Active requests, keep-alive measures, and personal settings are not included in the cloning scope.\n4. After successful import, it\'s crucial to re-enter the [General Settings] and toggle on the functions you need! (Or manually grant permissions in system settings).</string>
     <string name="operating_instruction_offline">Important Note:\nThis feature is strictly intended for personal use in switching between old and new phones. Any consequences arising from illegal use are the user\'s responsibility!\n\nNotes:\n1. The exporting and importing apps must have identical versions for one-click cloning to work!\n2. Upon successful import on the new phone, the senders and forwarding rules will be entirely replaced, clearing the history records!\n3. Active requests, keep-alive measures, and personal settings are not included in the cloning process.\n4. After a successful import, it\'s crucial to re-enter the [General Settings] and toggle on the functions you need! (Or manually grant permissions in system settings).</string>
+    <string name="operating_instruction_qr">Important Note:\nThis feature is intended solely for personal use in switching between old and new phones. Any consequences arising from illegal use are the user\'s responsibility!\n\nQR mode is fully offline and does not require the same WiFi network or an HTTP service.\n\nInstructions:\n1. On the old phone, tap [Generate QR Code] and show all QR codes in order.\n2. On the new phone, tap [Scan to Import] and scan the QR codes continuously. Out-of-order and duplicate scans are supported.\n3. After all parts are collected, the app verifies, decompresses, and restores the configuration automatically.\n\nNotes:\n1. QR content is not encrypted and has the same security level as the current JSON file export. Do not share it with others.\n2. The exporting and importing app versions must match for one-click cloning.\n3. After import, senders, forwarding rules, and Frpc configs will be fully overwritten and history will be cleared.\n4. After import, change the device name in [General Settings] and check the Frpc ports and proxy names.</string>
     <string name="push">Push</string>
     <string name="pull">Pull</string>
     <string name="stop">Stop</string>
@@ -818,6 +820,21 @@
     <string name="export_succeeded">Export configuration succeeded!</string>
     <string name="export_failed">Export failed, please check write permission!</string>
     <string name="export_failed_tips">Export failed: %s</string>
+    <string name="clone_qr_generate">Generate\nQR</string>
+    <string name="clone_qr_scan">Scan\nImport</string>
+    <string name="clone_qr_export_title">QR Export</string>
+    <string name="clone_qr_import_title">QR Import</string>
+    <string name="clone_qr_sensitive_warning">The QR codes contain the full clone configuration and are not encrypted. They have the same security level as a JSON file export. Only show and scan them in a trusted environment.</string>
+    <string name="clone_qr_progress">Code %1$d / %2$d</string>
+    <string name="clone_qr_summary">Switch QR codes on the old phone and scan them one by one on the new phone. Each QR bitmap is generated at 512x512 px.</string>
+    <string name="clone_qr_prev">Previous</string>
+    <string name="clone_qr_next">Next</string>
+    <string name="clone_qr_scan_prompt">Scan a SmsForwarder clone QR code</string>
+    <string name="clone_qr_scan_progress">Scanned %1$d / %2$d codes. Continue scanning the next one.</string>
+    <string name="clone_qr_scan_cancelled">Scan cancelled</string>
+    <string name="clone_qr_invalid">Invalid QR code: %1$s</string>
+    <string name="clone_qr_session_mismatch">This QR code is not from the current scan batch. Continue scanning QR codes from the same batch.</string>
+    <string name="clone_qr_import_succeeded_reminder">Configuration import succeeded!\nRestart the app for changes to take effect.\n\nAfter restart, check these items:\n1. Change the device name in [General Settings] to avoid duplicate old and new device names.\n2. Check Frpc ports and proxy names to avoid conflicts with the old device.\n3. Review all configuration items again.</string>
     <string name="import_failed">Import failed: Please check for external storage access!</string>
     <string name="import_failed_file_not_exist">Import failed: local backup file does not exist</string>
     <string name="import_succeeded">Import configuration successful!</string>
